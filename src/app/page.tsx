@@ -102,10 +102,17 @@ export default function Home() {
 
   // === PDF to image ===
   const convertPdfToImage = async (pdfFile: File): Promise<{ file: File; url: string }> => {
-    const pdfjsLib = await import("pdfjs-dist");
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+    const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "";
+
     const arrayBuffer = await pdfFile.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const pdf = await pdfjsLib.getDocument({
+      data: new Uint8Array(arrayBuffer),
+      useWorkerFetch: false,
+      isEvalSupported: false,
+      useSystemFonts: true,
+    } as any).promise;
+
     const page = await pdf.getPage(1);
     const scale = 2;
     const viewport = page.getViewport({ scale });
@@ -114,9 +121,10 @@ export default function Home() {
     canvas.height = viewport.height;
     const ctx = canvas.getContext("2d")!;
     await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
+
     const dataUrl = canvas.toDataURL("image/png");
     const blob = await (await fetch(dataUrl)).blob();
-    const imgFile = new File([blob], pdfFile.name.replace(".pdf", ".png"), { type: "image/png" });
+    const imgFile = new File([blob], pdfFile.name.replace(/\.pdf$/i, ".png"), { type: "image/png" });
     return { file: imgFile, url: dataUrl };
   };
 
