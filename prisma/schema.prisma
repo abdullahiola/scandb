@@ -1,0 +1,33 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Collection {
+  id          Int        @id @default(autoincrement())
+  name        String
+  description String     @default("")
+  schema      String     @default("[]") // JSON array of field definitions
+  icon        String     @default("📄")
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  documents   Document[]
+}
+
+model Document {
+  id           Int        @id @default(autoincrement())
+  collectionId Int
+  collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  fileName     String
+  filePath     String
+  rawText      String     @default("")
+  parsedData   String     @default("{}") // JSON object of extracted fields
+  confidence   Float      @default(0)
+  status       String     @default("pending") // pending, reviewed, archived
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}
