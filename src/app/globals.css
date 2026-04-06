@@ -340,6 +340,21 @@ html, body {
   object-fit: contain;
 }
 
+.pdf-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.pdf-placeholder.dark { color: var(--text-muted); }
+
+.pdf-placeholder svg { color: var(--accent); opacity: 0.7; }
+
 .bottom-actions {
   display: flex;
   gap: 10px;

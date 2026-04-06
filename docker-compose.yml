@@ -1,9 +1,9 @@
 services:
-  scandb:
-    build: .
-    container_name: scandb
+  backend:
+    build: ./backend
+    container_name: scandb-api
     ports:
-      - "3001:3000"
+      - "8000:8000"
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     restart: unless-stopped

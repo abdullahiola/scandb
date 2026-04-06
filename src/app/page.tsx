@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { createWorker, Worker } from "tesseract.js";
 
 type AppState = "camera" | "preview" | "processing" | "results";
 
@@ -9,6 +8,8 @@ interface ParsedField {
   key: string;
   value: string;
 }
+
+const API = process.env.NEXT_PUBLIC_API_URL || "";
 
 export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -100,132 +101,86 @@ export default function Home() {
     }, "image/jpeg", 0.92);
   }, [stopCamera]);
 
-  // === PDF to image ===
-  const convertPdfToImage = async (pdfFile: File): Promise<{ file: File; url: string }> => {
-    const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
-    pdfjsLib.GlobalWorkerOptions.workerSrc = "";
-
-    const arrayBuffer = await pdfFile.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({
-      data: new Uint8Array(arrayBuffer),
-      useWorkerFetch: false,
-      isEvalSupported: false,
-      useSystemFonts: true,
-    } as any).promise;
-
-    const page = await pdf.getPage(1);
-    const scale = 2;
-    const viewport = page.getViewport({ scale });
-    const canvas = document.createElement("canvas");
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    const ctx = canvas.getContext("2d")!;
-    await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
-
-    const dataUrl = canvas.toDataURL("image/png");
-    const blob = await (await fetch(dataUrl)).blob();
-    const imgFile = new File([blob], pdfFile.name.replace(/\.pdf$/i, ".png"), { type: "image/png" });
-    return { file: imgFile, url: dataUrl };
-  };
-
   // === File upload ===
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
     e.target.value = "";
     stopCamera();
+    setFile(f);
 
     if (f.type === "application/pdf") {
-      setState("processing");
-      setProgress(0);
-      setStatusText("Converting PDF...");
-      try {
-        const { file: imgFile, url } = await convertPdfToImage(f);
-        setFile(imgFile);
-        setPreviewUrl(url);
-        setState("preview");
-      } catch (err) {
-        console.error("PDF error:", err);
-        showToast("Failed to convert PDF");
-        setState("camera");
-        startCamera(facingMode);
-      }
+      // For PDFs, just use file icon as preview
+      setPreviewUrl(null);
     } else {
-      setFile(f);
       setPreviewUrl(URL.createObjectURL(f));
-      setState("preview");
     }
+    setState("preview");
   };
 
-  // === OCR ===
-  const startOCR = async () => {
+  // === Process via FastAPI ===
+  const startScan = async () => {
     if (!file) return;
     setState("processing");
-    setProgress(0);
-    setStatusText("Initializing...");
+    setProgress(10);
+    setStatusText("Uploading...");
 
-    let worker: Worker | null = null;
     try {
-      worker = await createWorker("eng", undefined, {
-        logger: (m: { status: string; progress: number }) => {
-          if (m.status === "recognizing text") {
-            setProgress(Math.round(m.progress * 90));
-            setStatusText("Reading document...");
-          } else if (m.status === "loading language traineddata") {
-            setProgress(5);
-            setStatusText("Loading language data...");
-          }
-        },
-      });
+      const formData = new FormData();
+      formData.append("file", file);
 
-      const { data } = await worker.recognize(file);
-      setRawText(data.text);
-      setConfidence(data.confidence);
-      setProgress(95);
-      setStatusText("Analyzing fields...");
-      await worker.terminate();
-      worker = null;
+      setProgress(30);
+      setStatusText("Processing document...");
 
-      await parseText(data.text);
-      setProgress(100);
-      setState("results");
-    } catch (err) {
-      console.error("OCR error:", err);
-      showToast("Scan failed — try again");
-      setState("preview");
-      if (worker) try { await worker.terminate(); } catch { /* */ }
-    }
-  };
-
-  const parseText = async (text: string) => {
-    try {
-      const res = await fetch("/api/parse", {
+      const res = await fetch(`${API}/scan`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rawText: text, documentType: "invoice", fields: [] }),
+        body: formData,
       });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Scan failed");
+      }
+
+      setProgress(80);
+      setStatusText("Analyzing...");
+
       const data = await res.json();
-      if (data.parsed) {
+      setRawText(data.raw_text || "");
+      setConfidence(data.confidence || 0);
+      setParseMethod(data.method || "regex");
+
+      if (data.fields) {
         setParsedFields(
-          Object.entries(data.parsed)
+          Object.entries(data.fields)
             .filter(([, v]) => String(v).trim() !== "")
             .map(([k, v]) => ({ key: k, value: String(v) }))
         );
-        setParseMethod(data.method || "regex");
       }
-    } catch {
-      setParsedFields([]);
+
+      setProgress(100);
+      setState("results");
+    } catch (err: any) {
+      showToast(err.message || "Scan failed — try again");
+      setState("preview");
     }
   };
 
   const downloadDB = async () => {
     try {
-      const res = await fetch("/api/export", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileName: file?.name || "scan", rawText, confidence, fields: parsedFields }),
+      const fieldsObj: Record<string, string> = {};
+      parsedFields.forEach(f => { fieldsObj[f.key] = f.value; });
+
+      const params = new URLSearchParams({
+        file_name: file?.name || "scan",
+        raw_text: rawText,
+        confidence: String(confidence),
+        fields: JSON.stringify(fieldsObj),
       });
+
+      const res = await fetch(`${API}/export?${params}`, { method: "POST" });
       if (!res.ok) throw new Error();
+
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -235,9 +190,9 @@ export default function Home() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      showToast("Database exported successfully");
+      showToast("Database exported");
     } catch {
-      showToast("Export failed — please retry");
+      showToast("Export failed");
     }
   };
 
@@ -248,6 +203,7 @@ export default function Home() {
     setRawText("");
     setConfidence(0);
     setParsedFields([]);
+    setParseMethod("");
     setShowRawText(false);
     setProgress(0);
     startCamera(facingMode);
@@ -259,10 +215,6 @@ export default function Home() {
     <div className="app">
       <canvas ref={canvasRef} style={{ display: "none" }} />
       <input id="gallery-input" type="file" accept="image/*,.pdf,application/pdf"
-        style={{ position: "fixed", top: "-9999px", left: "-9999px", opacity: 0 }}
-        onChange={handleFileUpload}
-      />
-      <input id="native-camera" type="file" accept="image/*,.pdf,application/pdf" capture="environment"
         style={{ position: "fixed", top: "-9999px", left: "-9999px", opacity: 0 }}
         onChange={handleFileUpload}
       />
@@ -321,7 +273,6 @@ export default function Home() {
             </div>
           )}
 
-          {/* Camera bottom bar */}
           {!cameraError && (
             <div className="camera-bar">
               <label htmlFor="gallery-input" className="cam-btn">
@@ -347,11 +298,18 @@ export default function Home() {
             <div style={{ width: 36 }} />
           </div>
           <div className="preview-area">
-            {previewUrl && <img src={previewUrl} alt="Preview" className="preview-img" />}
+            {previewUrl ? (
+              <img src={previewUrl} alt="Preview" className="preview-img" />
+            ) : (
+              <div className="pdf-placeholder">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                <span>{file?.name || "PDF Document"}</span>
+              </div>
+            )}
           </div>
           <div className="bottom-actions">
             <button className="btn btn-ghost" onClick={reset}>Retake</button>
-            <button className="btn btn-primary" onClick={startOCR}>Scan Document</button>
+            <button className="btn btn-primary" onClick={startScan}>Scan Document</button>
           </div>
         </div>
       )}
@@ -389,7 +347,14 @@ export default function Home() {
               <span className="nav-title">Results</span>
               <div style={{ width: 36 }} />
             </div>
-            {previewUrl && <img src={previewUrl} alt="Scanned" className="preview-img" />}
+            {previewUrl ? (
+              <img src={previewUrl} alt="Scanned" className="preview-img" />
+            ) : (
+              <div className="pdf-placeholder dark">
+                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                <span>{file?.name}</span>
+              </div>
+            )}
           </div>
 
           <div className="results-sheet">
