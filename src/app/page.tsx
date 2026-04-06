@@ -79,7 +79,6 @@ export default function Home() {
     startCamera(next);
   };
 
-  // === Capture from live camera ===
   const capturePhoto = useCallback(() => {
     if (!videoRef.current || !canvasRef.current) return;
     const video = videoRef.current;
@@ -89,10 +88,8 @@ export default function Home() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.drawImage(video, 0, 0);
-
     setShowFlash(true);
     setTimeout(() => setShowFlash(false), 300);
-
     canvas.toBlob(blob => {
       if (!blob) return;
       const f = new File([blob], `scan_${Date.now()}.jpg`, { type: "image/jpeg" });
@@ -103,15 +100,53 @@ export default function Home() {
     }, "image/jpeg", 0.92);
   }, [stopCamera]);
 
-  // === File upload (gallery or native camera fallback) ===
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // === PDF to image ===
+  const convertPdfToImage = async (pdfFile: File): Promise<{ file: File; url: string }> => {
+    const pdfjsLib = await import("pdfjs-dist");
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+    const arrayBuffer = await pdfFile.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const page = await pdf.getPage(1);
+    const scale = 2;
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement("canvas");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    const ctx = canvas.getContext("2d")!;
+    await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
+    const dataUrl = canvas.toDataURL("image/png");
+    const blob = await (await fetch(dataUrl)).blob();
+    const imgFile = new File([blob], pdfFile.name.replace(".pdf", ".png"), { type: "image/png" });
+    return { file: imgFile, url: dataUrl };
+  };
+
+  // === File upload ===
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
     e.target.value = "";
-    setFile(f);
-    setPreviewUrl(URL.createObjectURL(f));
-    setState("preview");
     stopCamera();
+
+    if (f.type === "application/pdf") {
+      setState("processing");
+      setProgress(0);
+      setStatusText("Converting PDF...");
+      try {
+        const { file: imgFile, url } = await convertPdfToImage(f);
+        setFile(imgFile);
+        setPreviewUrl(url);
+        setState("preview");
+      } catch (err) {
+        console.error("PDF error:", err);
+        showToast("Failed to convert PDF");
+        setState("camera");
+        startCamera(facingMode);
+      }
+    } else {
+      setFile(f);
+      setPreviewUrl(URL.createObjectURL(f));
+      setState("preview");
+    }
   };
 
   // === OCR ===
@@ -119,7 +154,7 @@ export default function Home() {
     if (!file) return;
     setState("processing");
     setProgress(0);
-    setStatusText("Loading engine...");
+    setStatusText("Initializing...");
 
     let worker: Worker | null = null;
     try {
@@ -127,7 +162,7 @@ export default function Home() {
         logger: (m: { status: string; progress: number }) => {
           if (m.status === "recognizing text") {
             setProgress(Math.round(m.progress * 90));
-            setStatusText("Scanning text...");
+            setStatusText("Reading document...");
           } else if (m.status === "loading language traineddata") {
             setProgress(5);
             setStatusText("Loading language data...");
@@ -139,7 +174,7 @@ export default function Home() {
       setRawText(data.text);
       setConfidence(data.confidence);
       setProgress(95);
-      setStatusText("Analyzing...");
+      setStatusText("Analyzing fields...");
       await worker.terminate();
       worker = null;
 
@@ -192,9 +227,9 @@ export default function Home() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      showToast("Database saved!");
+      showToast("Database exported successfully");
     } catch {
-      showToast("Download failed");
+      showToast("Export failed — please retry");
     }
   };
 
@@ -215,20 +250,17 @@ export default function Home() {
   return (
     <div className="app">
       <canvas ref={canvasRef} style={{ display: "none" }} />
-
-      {/* Hidden inputs for fallback / gallery */}
-      <input id="gallery-input" type="file" accept="image/*"
+      <input id="gallery-input" type="file" accept="image/*,.pdf,application/pdf"
         style={{ position: "fixed", top: "-9999px", left: "-9999px", opacity: 0 }}
         onChange={handleFileUpload}
       />
-      <input id="native-camera" type="file" accept="image/*" capture="environment"
+      <input id="native-camera" type="file" accept="image/*,.pdf,application/pdf" capture="environment"
         style={{ position: "fixed", top: "-9999px", left: "-9999px", opacity: 0 }}
         onChange={handleFileUpload}
       />
-
       {showFlash && <div className="flash-overlay" />}
 
-      {/* ===== CAMERA ===== */}
+      {/* ===== LIVE CAMERA ===== */}
       {state === "camera" && (
         <div className="camera-screen">
           {!cameraError ? (
@@ -244,45 +276,53 @@ export default function Home() {
               {!cameraReady && (
                 <div className="camera-loading">
                   <div className="loading-spinner" />
-                  <span>Starting camera...</span>
+                  <span>Initializing camera...</span>
                 </div>
               )}
             </>
           ) : (
-            /* Fallback when camera is blocked */
             <div className="fallback-screen">
-              <div className="hero-icon">📷</div>
-              <h2 className="hero-title">Scan Document</h2>
-              <p className="hero-subtitle">Camera unavailable — use the options below</p>
+              <div className="fallback-icon">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                  <circle cx="12" cy="13" r="4"/>
+                </svg>
+              </div>
+              <h2 className="fallback-title">Camera Unavailable</h2>
+              <p className="fallback-sub">Use the options below to scan your document</p>
               <div className="fallback-actions">
                 <label className="action-card">
-                  <input type="file" accept="image/*" capture="environment" onChange={handleFileUpload} />
-                  <div className="action-card-icon camera">📸</div>
-                  <div className="action-card-text">
-                    <h3>Take Photo</h3>
-                    <p>Opens your camera app</p>
+                  <input type="file" accept="image/*,.pdf,application/pdf" capture="environment" onChange={handleFileUpload} />
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                  <div className="action-card-info">
+                    <strong>Take Photo</strong>
+                    <span>Opens your camera app</span>
                   </div>
-                  <span className="action-card-arrow">›</span>
+                  <svg className="action-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
                 </label>
                 <label className="action-card">
-                  <input type="file" accept="image/*" onChange={handleFileUpload} />
-                  <div className="action-card-icon gallery">🖼️</div>
-                  <div className="action-card-text">
-                    <h3>Choose from Gallery</h3>
-                    <p>Pick an existing photo</p>
+                  <input type="file" accept="image/*,.pdf,application/pdf" onChange={handleFileUpload} />
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                  <div className="action-card-info">
+                    <strong>Choose File</strong>
+                    <span>Image or PDF</span>
                   </div>
-                  <span className="action-card-arrow">›</span>
+                  <svg className="action-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
                 </label>
               </div>
             </div>
           )}
 
-          {/* Bottom bar — only when camera is live */}
+          {/* Camera bottom bar */}
           {!cameraError && (
             <div className="camera-bar">
-              <label htmlFor="gallery-input" className="cam-btn small">🖼️</label>
+              <label htmlFor="gallery-input" className="cam-btn">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+              </label>
               <button className="shutter" onClick={capturePhoto} disabled={!cameraReady} aria-label="Capture" />
-              <button className="cam-btn small" onClick={flipCamera} disabled={!cameraReady}>🔄</button>
+              <button className="cam-btn" onClick={flipCamera} disabled={!cameraReady}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+              </button>
             </div>
           )}
         </div>
@@ -291,17 +331,19 @@ export default function Home() {
       {/* ===== PREVIEW ===== */}
       {state === "preview" && (
         <div className="preview-screen">
-          <div className="preview-header">
-            <button className="back-btn" onClick={reset}>←</button>
-            <span className="preview-label">Preview</span>
+          <div className="top-nav">
+            <button className="nav-btn" onClick={reset}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            </button>
+            <span className="nav-title">Preview</span>
             <div style={{ width: 36 }} />
           </div>
           <div className="preview-area">
             {previewUrl && <img src={previewUrl} alt="Preview" className="preview-img" />}
           </div>
-          <div className="preview-bar">
+          <div className="bottom-actions">
             <button className="btn btn-ghost" onClick={reset}>Retake</button>
-            <button className="btn btn-primary" onClick={startOCR}>⚡ Scan Document</button>
+            <button className="btn btn-primary" onClick={startOCR}>Scan Document</button>
           </div>
         </div>
       )}
@@ -310,7 +352,7 @@ export default function Home() {
       {state === "processing" && (
         <div className="preview-screen">
           <div className="preview-area">
-            {previewUrl && <img src={previewUrl} alt="Scanning" className="preview-img" style={{ opacity: 0.3 }} />}
+            {previewUrl && <img src={previewUrl} alt="Scanning" className="preview-img" style={{ opacity: 0.25 }} />}
             <div className="processing-overlay">
               <div className="spinner-ring">
                 <svg viewBox="0 0 72 72">
@@ -332,9 +374,11 @@ export default function Home() {
       {state === "results" && (
         <div className="results-screen">
           <div className="results-image">
-            <div className="preview-header">
-              <button className="back-btn" onClick={reset}>←</button>
-              <span className="preview-label">Results</span>
+            <div className="top-nav overlay-nav">
+              <button className="nav-btn" onClick={reset}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+              </button>
+              <span className="nav-title">Results</span>
               <div style={{ width: 36 }} />
             </div>
             {previewUrl && <img src={previewUrl} alt="Scanned" className="preview-img" />}
@@ -345,13 +389,12 @@ export default function Home() {
             <div className="sheet-section">
               <div className="sheet-title-row">
                 <span className="sheet-title">Extracted Data</span>
-                <span className="method-badge">{parseMethod === "ai" ? "🤖 AI" : "📐 Auto"}</span>
+                <span className="method-badge">{parseMethod === "ai" ? "AI Parsed" : "Auto Parsed"}</span>
               </div>
 
               <div className="confidence-card">
-                <span className="conf-icon">{confidence >= 80 ? "🎯" : confidence >= 50 ? "⚠️" : "❌"}</span>
                 <div className="conf-info">
-                  <div className="conf-label">Accuracy</div>
+                  <div className="conf-label">OCR Confidence</div>
                   <div className="conf-bar">
                     <div
                       className={`conf-bar-fill ${confidence >= 80 ? "high" : confidence >= 50 ? "mid" : "low"}`}
@@ -364,7 +407,7 @@ export default function Home() {
 
               {parsedFields.length > 0 && (
                 <>
-                  <div className="fields-title">📊 Fields</div>
+                  <div className="section-label">Detected Fields</div>
                   <div className="fields-grid">
                     {parsedFields.map((f, i) => (
                       <div key={i} className="field-item">
@@ -377,21 +420,23 @@ export default function Home() {
               )}
 
               <button className="raw-toggle" onClick={() => setShowRawText(!showRawText)}>
-                <span>📝 Raw Text</span>
-                <span>{showRawText ? "▲" : "▼"}</span>
+                <span>Raw OCR Text</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transform: showRawText ? "rotate(180deg)" : "none", transition: "transform 200ms" }}>
+                  <path d="M6 9l6 6 6-6"/>
+                </svg>
               </button>
               {showRawText && <pre className="raw-box">{rawText || "No text detected"}</pre>}
             </div>
 
             <div className="action-row">
-              <button className="btn btn-success" onClick={downloadDB}>💾 Download .db</button>
-              <button className="btn btn-ghost" onClick={reset}>📷 New Scan</button>
+              <button className="btn btn-success" onClick={downloadDB}>Export as .db</button>
+              <button className="btn btn-ghost" onClick={reset}>New Scan</button>
             </div>
           </div>
         </div>
       )}
 
-      {toast && <div className="toast">✨ {toast}</div>}
+      {toast && <div className="toast">{toast}</div>}
     </div>
   );
 }
