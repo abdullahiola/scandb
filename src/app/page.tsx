@@ -9,7 +9,7 @@ interface ParsedField {
   value: string;
 }
 
-const API = process.env.NEXT_PUBLIC_API_URL || "";
+
 
 export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -132,7 +132,7 @@ export default function Home() {
       setProgress(30);
       setStatusText("Processing document...");
 
-      const res = await fetch(`${API}/scan`, {
+      const res = await fetch(`/api/scan`, {
         method: "POST",
         body: formData,
       });
@@ -171,14 +171,16 @@ export default function Home() {
       const fieldsObj: Record<string, string> = {};
       parsedFields.forEach(f => { fieldsObj[f.key] = f.value; });
 
-      const params = new URLSearchParams({
-        file_name: file?.name || "scan",
-        raw_text: rawText,
-        confidence: String(confidence),
-        fields: JSON.stringify(fieldsObj),
+      const res = await fetch(`/api/export-db`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          file_name: file?.name || "scan",
+          raw_text: rawText,
+          confidence,
+          fields: fieldsObj,
+        }),
       });
-
-      const res = await fetch(`${API}/export?${params}`, { method: "POST" });
       if (!res.ok) throw new Error();
 
       const blob = await res.blob();
