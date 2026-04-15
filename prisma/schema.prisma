@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client"
+  provider = "prisma-client-js"
   output   = "../src/generated/prisma"
 }
 
@@ -30,4 +30,32 @@ model Document {
   status       String     @default("pending") // pending, reviewed, archived
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
+}
+
+model Staff {
+  id          Int             @id @default(autoincrement())
+  name        String
+  department  String          @default("")
+  staffId     String          @default("") // PF number from ref
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  documents   StaffDocument[]
+}
+
+model StaffDocument {
+  id             Int      @id @default(autoincrement())
+  staffId        Int
+  staff          Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  documentType   String   // confirmation_of_appointment | assumption_of_duty | promotion_exercise | posting
+  documentLabel  String   @default("") // Human-readable label
+  fileName       String
+  filePath       String   @default("")
+  rawText        String   @default("")
+  extractedData  String   @default("{}") // JSON of extracted fields
+  fullContent    String   @default("")   // Full document content
+  confidence     Float    @default(0)
+  isForm         Boolean  @default(false)
+  status         String   @default("pending") // pending | reviewed | archived
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }
