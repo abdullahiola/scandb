@@ -592,6 +592,13 @@ export default function ScanApp() {
       />
       {showFlash && <div className="flash-overlay" />}
 
+      {/* UI Logo - Top Right */}
+      <img
+        src="/ui-logo.jpeg"
+        alt="University Logo"
+        className="app-logo"
+      />
+
       {/* ===== LIVE CAMERA ===== */}
       {state === "camera" && (
         <div className="camera-screen">
