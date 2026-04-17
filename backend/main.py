@@ -458,12 +458,55 @@ EXTRACTORS = {
 }
 
 
+def clean_field_value(value: str) -> str:
+    """
+    Clean extracted field values by removing OCR filler characters.
+    Template forms use lines of dashes, dots, or underscores as
+    blank fill-in placeholders — OCR reads these as text.
+    """
+    if not value:
+        return value
+
+    # Strip the value first
+    val = value.strip()
+
+    # Remove leading/trailing filler characters
+    val = val.strip("-._·…")
+    val = val.strip()
+
+    # If the entire value is just filler characters (dashes, dots, underscores, spaces)
+    if re.match(r'^[\-\._·…\s]+$', val):
+        return ""
+
+    # Remove long runs of filler characters (3+ consecutive)
+    val = re.sub(r'[\.]{3,}', '', val)
+    val = re.sub(r'[\-]{3,}', '', val)
+    val = re.sub(r'[_]{3,}', '', val)
+    val = re.sub(r'[·]{3,}', '', val)
+    val = re.sub(r'[…]{2,}', '', val)
+
+    # Clean up extra whitespace left behind
+    val = re.sub(r'\s{2,}', ' ', val).strip()
+
+    return val
+
+
 def extract_fields_for_type(text: str, doc_type: str) -> dict:
     """Extract fields based on identified document type."""
     extractor = EXTRACTORS.get(doc_type)
     if extractor:
-        return extractor(text)
-    return extract_fields_generic(text)
+        fields = extractor(text)
+    else:
+        fields = extract_fields_generic(text)
+
+    # Clean all field values to remove filler characters
+    cleaned = {}
+    for k, v in fields.items():
+        cleaned_val = clean_field_value(str(v))
+        if cleaned_val:  # Only keep non-empty values after cleaning
+            cleaned[k] = cleaned_val
+
+    return cleaned
 
 
 def extract_fields_generic(text: str) -> dict:
@@ -661,8 +704,14 @@ async def scan_document(file: UploadFile = File(...)):
         # Extract fields based on identified type
         extracted_fields = extract_fields_for_type(best_text, doc_info["type"])
 
-        # Clean empty values
-        extracted_fields = {k: v for k, v in extracted_fields.items() if v and str(v).strip()}
+        # Clean empty values and filler characters
+        extracted_fields = {
+            k: clean_field_value(str(v))
+            for k, v in extracted_fields.items()
+            if v and str(v).strip()
+        }
+        # Remove fields that became empty after cleaning
+        extracted_fields = {k: v for k, v in extracted_fields.items() if v}
 
         return {
             "raw_text": best_text,
