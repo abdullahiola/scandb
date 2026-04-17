@@ -33,8 +33,12 @@ COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 
-# Create uploads & temp directories
-RUN mkdir -p public/uploads .tmp && chown -R app:app .
+# Copy Prisma schema + generated client for runtime
+COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/src/generated ./src/generated
+
+# Create uploads, temp, and db directories
+RUN mkdir -p public/uploads .tmp prisma && chown -R app:app .
 
 USER app
 

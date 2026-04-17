@@ -7,3 +7,16 @@ services:
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     restart: unless-stopped
+
+  frontend:
+    build: .
+    container_name: scandb-web
+    ports:
+      - "3001:3000"
+    environment:
+      - BACKEND_URL=http://backend:8000
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - DATABASE_URL=file:./dev.db
+    depends_on:
+      - backend
+    restart: unless-stopped
