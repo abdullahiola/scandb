@@ -2,7 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  serverExternalPackages: ['tesseract.js', 'better-sqlite3', 'pdf-parse'],
+  allowedDevOrigins: ['192.168.1.197'],
+  serverExternalPackages: ['tesseract.js', 'pdf-parse'],
   turbopack: {},
 };
 
