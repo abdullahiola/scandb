@@ -4,11 +4,13 @@ const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
 
 export async function POST(req: NextRequest) {
   try {
-    const formData = await req.formData();
+    const contentType = req.headers.get("content-type") || "";
+    const body = await req.arrayBuffer();
 
     const res = await fetch(`${BACKEND_URL}/scan`, {
       method: "POST",
-      body: formData,
+      headers: { "Content-Type": contentType },
+      body: body,
     });
 
     if (!res.ok) {
