@@ -63,6 +63,11 @@ export default function Repository() {
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
+  // Add document to staff
+  const [addDocModal, setAddDocModal] = useState(false);
+  const [uploadingDoc, setUploadingDoc] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState("");
+
   // Edit mode state
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
@@ -262,6 +267,90 @@ export default function Repository() {
     }
   };
 
+  // ── Add document to existing staff ──────────────────
+  const addDocumentToStaff = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!selectedStaff || !e.target.files || e.target.files.length === 0) return;
+    setUploadingDoc(true);
+    setUploadProgress("Uploading...");
+
+    const filesToProcess = Array.from(e.target.files);
+    e.target.value = "";
+    let successCount = 0;
+
+    for (const file of filesToProcess) {
+      try {
+        setUploadProgress(`Scanning ${file.name}...`);
+
+        // 1. Scan the document
+        const formData = new FormData();
+        formData.append("file", file);
+        const scanRes = await fetch("/api/scan-document", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!scanRes.ok) throw new Error("Scan failed");
+        let scanData = await scanRes.json();
+
+        // Handle background job (large files)
+        if (scanData.job_id) {
+          setUploadProgress(`Processing ${file.name}...`);
+          while (true) {
+            await new Promise(r => setTimeout(r, 1500));
+            const pollRes = await fetch(`/api/jobs/${scanData.job_id}`);
+            const job = await pollRes.json();
+            if (job.status === "error") throw new Error(job.error || "Processing failed");
+            if (job.status === "done" && job.result) { scanData = job.result; break; }
+            setUploadProgress(`Processing ${file.name} (${job.pages_done}/${job.total_pages} pages)...`);
+          }
+        }
+
+        setUploadProgress(`Saving ${file.name}...`);
+
+        // 2. Save to this staff
+        const extractedData: Record<string, string> = {};
+        if (scanData.fields) {
+          Object.entries(scanData.fields).forEach(([k, v]) => {
+            extractedData[k] = String(v);
+          });
+        }
+
+        const saveRes = await fetch("/api/staff", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: selectedStaff.name,
+            department: selectedStaff.department,
+            staffId: selectedStaff.staffId,
+            document: {
+              documentType: scanData.document_type || "unknown",
+              documentLabel: scanData.document_label || "Unknown Document",
+              fileName: file.name,
+              rawText: scanData.raw_text || "",
+              extractedData,
+              fullContent: scanData.raw_text || "",
+              confidence: scanData.confidence || 0,
+              isForm: scanData.is_form || false,
+            },
+          }),
+        });
+
+        if (saveRes.ok) successCount++;
+      } catch (err: any) {
+        showToast(`Failed to process ${file.name}: ${err.message}`);
+      }
+    }
+
+    // Refresh
+    await fetchStaffDetail(selectedStaff.id);
+    await fetchStaff();
+    setUploadingDoc(false);
+    setUploadProgress("");
+    if (successCount > 0) {
+      showToast(`${successCount} document${successCount > 1 ? "s" : ""} added!`);
+    }
+  };
+
   // ── Filtering ──────────────────────────────────
   const filtered = staffList.filter((s) => {
     const q = search.toLowerCase();
@@ -314,7 +403,7 @@ export default function Repository() {
       <header className="repo-header">
         <div className="repo-brand">
           <div className="repo-logo-icon">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+            <img src="/ui-logo.jpeg" alt="University of Ibadan" className="repo-logo-img" />
           </div>
           <div>
             <h1>ScanDB Repository</h1>
@@ -521,8 +610,28 @@ export default function Repository() {
 
               {/* Documents */}
               <div className="docs-section">
-                <div className="docs-section-title">
-                  Documents ({selectedStaff.documents?.length || 0})
+                <div className="docs-section-header">
+                  <div className="docs-section-title">
+                    Documents ({selectedStaff.documents?.length || 0})
+                  </div>
+                  <label className="repo-btn primary add-doc-btn">
+                    <input
+                      type="file"
+                      accept="image/*,.pdf,application/pdf"
+                      multiple
+                      onChange={addDocumentToStaff}
+                      style={{ display: "none" }}
+                      disabled={uploadingDoc}
+                    />
+                    {uploadingDoc ? (
+                      <>{uploadProgress}</>
+                    ) : (
+                      <>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        Add Document
+                      </>
+                    )}
+                  </label>
                 </div>
                 <div className="docs-grid">
                   {(!selectedStaff.documents || selectedStaff.documents.length === 0) ? (

@@ -204,6 +204,40 @@ export default function ScanApp() {
     }
   };
 
+  // === Poll a background job until done ===
+  const pollJob = async (
+    jobId: string,
+    file: File,
+    fileBaseProgress: number,
+    fileProgressRange: number
+  ): Promise<any> => {
+    while (true) {
+      await new Promise(r => setTimeout(r, 1500));
+      const pollRes = await fetch(`/api/jobs/${jobId}`);
+      if (!pollRes.ok) throw new Error("Failed to check job status");
+
+      const job = await pollRes.json();
+
+      if (job.status === "error") {
+        throw new Error(job.error || "Processing failed");
+      }
+
+      if (job.status === "done" && job.result) {
+        return job.result;
+      }
+
+      // Update progress based on pages processed
+      const pageProgress = job.total_pages > 0
+        ? (job.pages_done / job.total_pages)
+        : 0;
+      const adjustedProgress = fileBaseProgress + fileProgressRange * (0.2 + pageProgress * 0.7);
+      setProgress(Math.round(adjustedProgress));
+      setStatusText(
+        job.current_step || `Processing ${file.name}... (${job.pages_done}/${job.total_pages} pages)`
+      );
+    }
+  };
+
   // === Process all files via backend /scan-document ===
   const startScan = async () => {
     if (files.length === 0) return;
@@ -221,7 +255,6 @@ export default function ScanApp() {
       setProcessingIndex(i);
 
       try {
-        // Calculate progress for this file within the batch
         const fileBaseProgress = (i / total) * 100;
         const fileProgressRange = 100 / total;
 
@@ -230,9 +263,6 @@ export default function ScanApp() {
 
         const formData = new FormData();
         formData.append("file", file);
-
-        setProgress(Math.round(fileBaseProgress + fileProgressRange * 0.25));
-        setStatusText(`Running OCR on ${file.name}... (${i + 1}/${total})`);
 
         const res = await fetch(`/api/scan-document`, {
           method: "POST",
@@ -244,21 +274,28 @@ export default function ScanApp() {
           throw new Error(err.error || "Scan failed");
         }
 
-        setProgress(Math.round(fileBaseProgress + fileProgressRange * 0.6));
-        setStatusText(`Identifying ${file.name}... (${i + 1}/${total})`);
-
         const data = await res.json();
 
-        await new Promise(r => setTimeout(r, 200));
-        setProgress(Math.round(fileBaseProgress + fileProgressRange * 0.8));
-        setStatusText(`Extracting fields from ${file.name}... (${i + 1}/${total})`);
+        let scanResult: any;
+
+        // Check if this is a background job (large file)
+        if (data.job_id) {
+          setStatusText(`Processing ${file.name}... (queued)`);
+          setProgress(Math.round(fileBaseProgress + fileProgressRange * 0.15));
+          scanResult = await pollJob(data.job_id, file, fileBaseProgress, fileProgressRange);
+        } else {
+          // Inline result (small file)
+          setProgress(Math.round(fileBaseProgress + fileProgressRange * 0.8));
+          setStatusText(`Extracting fields from ${file.name}... (${i + 1}/${total})`);
+          scanResult = data;
+        }
 
         // Build editable fields list
         const fields: ParsedField[] = [];
         const extractedKeys = new Set<string>();
 
-        if (data.fields) {
-          Object.entries(data.fields)
+        if (scanResult.fields) {
+          Object.entries(scanResult.fields)
             .filter(([, v]) => String(v).trim() !== "")
             .forEach(([k, v]) => {
               fields.push({ key: k, value: String(v), editable: true });
@@ -266,8 +303,8 @@ export default function ScanApp() {
             });
         }
 
-        if (data.expected_fields) {
-          for (const field of data.expected_fields) {
+        if (scanResult.expected_fields) {
+          for (const field of scanResult.expected_fields) {
             if (!extractedKeys.has(field)) {
               fields.push({ key: field, value: "", editable: true });
             }
@@ -277,26 +314,25 @@ export default function ScanApp() {
         allResults.push({
           file,
           previewUrl,
-          rawText: data.raw_text || "",
-          originalRawText: data.raw_text || "",
-          confidence: data.confidence || 0,
+          rawText: scanResult.raw_text || "",
+          originalRawText: scanResult.raw_text || "",
+          confidence: scanResult.confidence || 0,
           parsedFields: fields,
-          parseMethod: data.method || "regex",
-          documentType: data.document_type || "unknown",
-          documentLabel: data.document_label || "Unknown Document",
-          typeConfidence: data.type_confidence || 0,
-          isForm: data.is_form || false,
-          expectedFields: data.expected_fields || [],
+          parseMethod: scanResult.method || "regex",
+          documentType: scanResult.document_type || "unknown",
+          documentLabel: scanResult.document_label || "Unknown Document",
+          typeConfidence: scanResult.type_confidence || 0,
+          isForm: scanResult.is_form || false,
+          expectedFields: scanResult.expected_fields || [],
           cleanedText: "",
           aiCleaned: false,
           aiCleaning: false,
           showRawText: false,
-          editMode: data.is_form || false,
+          editMode: scanResult.is_form || false,
         });
 
         setProgress(Math.round(fileBaseProgress + fileProgressRange));
       } catch (err: any) {
-        // Add a failed result placeholder
         allResults.push({
           file,
           previewUrl,
