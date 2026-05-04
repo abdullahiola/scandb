@@ -1,6 +1,4 @@
 import io
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, UploadFile, File
 from fastapi.responses import JSONResponse
@@ -14,7 +12,17 @@ from app.services.classifier import (
 from app.utils.fields import clean_field_value, extract_fields_generic
 
 router = APIRouter()
-executor = ThreadPoolExecutor(max_workers=4)
+
+MAX_DIMENSION = 2000  # Resize large images to prevent OCR timeout
+
+
+def resize_if_needed(img: Image.Image) -> Image.Image:
+    """Downscale oversized images to keep OCR fast."""
+    w, h = img.size
+    if max(w, h) > MAX_DIMENSION:
+        ratio = MAX_DIMENSION / max(w, h)
+        img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+    return img
 
 
 @router.post("/scan")
@@ -31,6 +39,8 @@ async def scan_document_legacy(file: UploadFile = File(...)):
 
         if img.mode != "RGB":
             img = img.convert("RGB")
+
+        img = resize_if_needed(img)
 
         data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
         raw_text = pytesseract.image_to_string(img)
@@ -55,10 +65,8 @@ async def scan_document_legacy(file: UploadFile = File(...)):
 @router.post("/scan-document")
 async def scan_document(file: UploadFile = File(...)):
     """
-    Smart scan endpoint:
-    1. OCR with handwriting support
-    2. Identify document type (parallel)
-    3. Extract type-specific fields
+    Smart scan endpoint — single OCR pass, classify, extract fields.
+    Optimized for VPS with limited CPU.
     """
     contents = await file.read()
     filename = file.filename or "unknown"
@@ -72,28 +80,16 @@ async def scan_document(file: UploadFile = File(...)):
         if img.mode != "RGB":
             img = img.convert("RGB")
 
+        # Resize to prevent timeouts on large scans
+        img = resize_if_needed(img)
+
+        # Preprocess for better OCR
         processed_img = preprocess_image(img)
+
+        # Single OCR pass on preprocessed image
         custom_config = r'--psm 6 --oem 3'
-
-        loop = asyncio.get_event_loop()
-
-        raw_text_future = loop.run_in_executor(
-            executor, lambda: pytesseract.image_to_string(img, config=custom_config)
-        )
-        processed_text_future = loop.run_in_executor(
-            executor, lambda: pytesseract.image_to_string(processed_img, config=custom_config)
-        )
-        data_future = loop.run_in_executor(
-            executor, lambda: pytesseract.image_to_data(
-                img, output_type=pytesseract.Output.DICT, config=custom_config
-            )
-        )
-
-        raw_text, processed_text, data = await asyncio.gather(
-            raw_text_future, processed_text_future, data_future
-        )
-
-        best_text = raw_text if len(raw_text.strip()) >= len(processed_text.strip()) else processed_text
+        raw_text = pytesseract.image_to_string(processed_img, config=custom_config)
+        data = pytesseract.image_to_data(processed_img, output_type=pytesseract.Output.DICT, config=custom_config)
 
         confidences = [
             int(c) for c, t in zip(data["conf"], data["text"])
@@ -101,8 +97,9 @@ async def scan_document(file: UploadFile = File(...)):
         ]
         avg_confidence = sum(confidences) / len(confidences) if confidences else 0
 
-        doc_info = await loop.run_in_executor(executor, identify_document_type, best_text)
-        extracted_fields = extract_fields_for_type(best_text, doc_info["type"])
+        # Classify and extract
+        doc_info = identify_document_type(raw_text)
+        extracted_fields = extract_fields_for_type(raw_text, doc_info["type"])
 
         # Clean empty values
         extracted_fields = {
@@ -113,7 +110,7 @@ async def scan_document(file: UploadFile = File(...)):
         extracted_fields = {k: v for k, v in extracted_fields.items() if v}
 
         return {
-            "raw_text": best_text,
+            "raw_text": raw_text,
             "confidence": round(avg_confidence, 1),
             "document_type": doc_info["type"],
             "document_label": doc_info["label"],
