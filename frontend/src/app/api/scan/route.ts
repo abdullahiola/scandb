@@ -4,23 +4,35 @@ const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
 
 export async function POST(req: NextRequest) {
   try {
-    const contentType = req.headers.get("content-type") || "";
-    const body = await req.arrayBuffer();
+    const formData = await req.formData();
+    const file = formData.get("file");
+
+    if (!file || !(file instanceof Blob)) {
+      return NextResponse.json({ error: "No file provided" }, { status: 400 });
+    }
+
+    const outgoing = new FormData();
+    outgoing.append("file", file);
 
     const res = await fetch(`${BACKEND_URL}/scan`, {
       method: "POST",
-      headers: { "Content-Type": contentType },
-      body: body,
+      body: outgoing,
     });
 
     if (!res.ok) {
-      const err = await res.json();
+      let err;
+      try {
+        err = await res.json();
+      } catch {
+        err = { error: `Backend returned ${res.status}` };
+      }
       return NextResponse.json(err, { status: res.status });
     }
 
     const data = await res.json();
     return NextResponse.json(data);
   } catch (e: any) {
+    console.error("scan proxy error:", e);
     return NextResponse.json(
       { error: `Backend unreachable: ${e.message}` },
       { status: 502 }
