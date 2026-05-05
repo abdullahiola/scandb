@@ -1,8 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: "standalone",
-  allowedDevOrigins: ['192.168.1.197'],
+  // Remove "standalone" for Vercel deployment
+  // output: "standalone",
   serverExternalPackages: ['tesseract.js', 'pdf-parse'],
   turbopack: {},
 };
