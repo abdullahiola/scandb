@@ -60,6 +60,38 @@
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
 }
 
+.dash-header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dash-theme-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 200ms;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.dash-theme-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--accent);
+  transform: rotate(15deg);
+}
+
+.dash-theme-btn:active {
+  transform: scale(0.9);
+}
+
 /* Stats */
 .dash-stats {
   display: grid;
@@ -517,7 +549,7 @@
   justify-content: space-around;
   padding: 6px 0;
   padding-bottom: max(6px, env(safe-area-inset-bottom));
-  background: rgba(9, 9, 11, 0.85);
+  background: var(--nav-bg);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-top: 1px solid var(--border);
@@ -565,4 +597,37 @@
 /* Adjust app padding for bottom nav */
 .app {
   padding-bottom: 70px;
+}
+
+/* Theme toggle in nav */
+.theme-toggle-tab {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.theme-toggle-tab .bottom-nav-icon {
+  color: var(--yellow);
+}
+
+[data-theme="light"] .theme-toggle-tab .bottom-nav-icon {
+  color: var(--purple);
+}
+
+/* Smooth theme transition */
+html {
+  transition: background-color 300ms ease, color 300ms ease;
+}
+
+html * {
+  transition: background-color 200ms ease, color 200ms ease, border-color 200ms ease, box-shadow 200ms ease;
+}
+
+/* Don't transition animations and transforms */
+html .loading-spinner,
+html .dash-loading-spinner,
+html .btn-spinner,
+html .ai-toggle-spinner {
+  transition: none;
 }

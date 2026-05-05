@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import BottomNavWrapper from "@/components/BottomNavWrapper";
+import ClientProviders from "@/components/ClientProviders";
 
 export const metadata: Metadata = {
   title: "ScanDB — Scan to Database",
@@ -18,8 +18,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        {children}
-        <BottomNavWrapper />
+        <ClientProviders>{children}</ClientProviders>
       </body>
     </html>
   );
