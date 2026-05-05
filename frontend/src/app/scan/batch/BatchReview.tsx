@@ -54,6 +54,10 @@ export default function BatchReviewPage() {
   const [committing, setCommitting] = useState(false);
   const [corrections, setCorrections] = useState<Record<string, { name?: string; department?: string }>>({});
   const [dragActive, setDragActive] = useState(false);
+  const [expandedDoc, setExpandedDoc] = useState<number | null>(null);
+  const [editFields, setEditFields] = useState<Record<number, Record<string, string>>>({});
+  const [aiCleaning, setAiCleaning] = useState<Record<number, boolean>>({});
+  const [aiCleaningAll, setAiCleaningAll] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -155,6 +159,75 @@ export default function BatchReviewPage() {
     } finally {
       setCommitting(false);
     }
+  };
+
+  // Get effective field value (edited or original)
+  const getField = (idx: number, key: string, original: string) => {
+    return editFields[idx]?.[key] ?? original;
+  };
+
+  // Update a field for a doc
+  const updateField = (idx: number, key: string, value: string) => {
+    setEditFields(prev => ({
+      ...prev,
+      [idx]: { ...prev[idx], [key]: value },
+    }));
+    // Also update corrections for commit
+    if (key === "name" || key === "department") {
+      setCorrections(prev => ({
+        ...prev,
+        [String(idx)]: { ...prev[String(idx)], [key]: value },
+      }));
+    }
+  };
+
+  // AI clean a single doc's fields
+  const handleAiClean = async (doc: BatchItem) => {
+    if (!doc.fields) return;
+    setAiCleaning(prev => ({ ...prev, [doc.index]: true }));
+    try {
+      const res = await fetch("/api/ai-clean-fields", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fields: { ...doc.fields, ...editFields[doc.index] },
+          documentType: doc.document_type,
+          rawText: "",
+        }),
+      });
+      if (!res.ok) throw new Error("AI cleaning failed");
+      const data = await res.json();
+      const cleaned = data.fields || {};
+      setEditFields(prev => ({ ...prev, [doc.index]: { ...prev[doc.index], ...cleaned } }));
+      if (cleaned.name || cleaned.department) {
+        setCorrections(prev => ({
+          ...prev,
+          [String(doc.index)]: {
+            ...prev[String(doc.index)],
+            ...(cleaned.name ? { name: cleaned.name } : {}),
+            ...(cleaned.department ? { department: cleaned.department } : {}),
+          },
+        }));
+      }
+    } catch (e: any) {
+      alert(e.message || "AI cleaning failed");
+    } finally {
+      setAiCleaning(prev => ({ ...prev, [doc.index]: false }));
+    }
+  };
+
+  // AI clean ALL docs
+  const handleAiCleanAll = async () => {
+    if (!batchData) return;
+    setAiCleaningAll(true);
+    const allDocs = [
+      ...Object.values(batchData.staff_groups).flatMap(g => g.documents),
+      ...batchData.unmatched,
+    ].filter(d => d.status === "done" && d.fields);
+    for (const doc of allDocs) {
+      await handleAiClean(doc);
+    }
+    setAiCleaningAll(false);
   };
 
   // Drag handlers
@@ -361,6 +434,17 @@ export default function BatchReviewPage() {
                 <span className="batch-summary-label">Unmatched</span>
               </div>
             )}
+            <button
+              className="batch-ai-all-btn"
+              onClick={handleAiCleanAll}
+              disabled={aiCleaningAll}
+            >
+              {aiCleaningAll ? (
+                <><span className="batch-btn-spinner" /> Cleaning...</>
+              ) : (
+                <>✨ AI Clean All</>
+              )}
+            </button>
           </div>
 
           {/* Staff groups */}
@@ -381,22 +465,42 @@ export default function BatchReviewPage() {
                 </div>
                 <div className="batch-group-docs">
                   {group.documents.map((doc) => (
-                    <div className="batch-group-doc" key={doc.index}>
-                      <span
-                        className="batch-doc-icon"
-                        style={{
-                          background: getDocColor(doc.document_type || "") + "18",
-                          color: getDocColor(doc.document_type || ""),
-                        }}
+                    <div key={doc.index}>
+                      <div
+                        className={`batch-group-doc ${expandedDoc === doc.index ? "expanded" : ""}`}
+                        onClick={() => setExpandedDoc(expandedDoc === doc.index ? null : doc.index)}
                       >
-                        {getDocIcon(doc.document_type || "")}
-                      </span>
-                      <span className="batch-doc-type">
-                        {doc.document_label || getDocShortLabel(doc.document_type || "")}
-                      </span>
-                      <span className="batch-doc-conf">
-                        {doc.confidence ? `${doc.confidence}%` : ""}
-                      </span>
+                        <span className="batch-doc-icon" style={{ background: getDocColor(doc.document_type || "") + "18", color: getDocColor(doc.document_type || "") }}>
+                          {getDocIcon(doc.document_type || "")}
+                        </span>
+                        <span className="batch-doc-type">
+                          {doc.document_label || getDocShortLabel(doc.document_type || "")}
+                        </span>
+                        <span className="batch-doc-conf">{doc.confidence ? `${doc.confidence}%` : ""}</span>
+                        <svg className="batch-doc-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 9l6 6 6-6"/></svg>
+                      </div>
+                      {expandedDoc === doc.index && doc.fields && (
+                        <div className="batch-doc-edit">
+                          {Object.entries(doc.fields).map(([key, val]) => (
+                            <div className="batch-field-row" key={key}>
+                              <label>{key.replace(/_/g, " ")}</label>
+                              <input
+                                type="text"
+                                value={getField(doc.index, key, val)}
+                                onChange={(e) => updateField(doc.index, key, e.target.value)}
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                            </div>
+                          ))}
+                          <button
+                            className="batch-ai-btn"
+                            onClick={(e) => { e.stopPropagation(); handleAiClean(doc); }}
+                            disabled={!!aiCleaning[doc.index]}
+                          >
+                            {aiCleaning[doc.index] ? <><span className="batch-btn-spinner" /> Cleaning...</> : <>✨ AI Clean Fields</>}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -410,20 +514,44 @@ export default function BatchReviewPage() {
                   <div className="batch-group-avatar warn-avatar">⚠️</div>
                   <div className="batch-group-info">
                     <div className="batch-group-name">Unmatched Documents</div>
-                    <div className="batch-group-dept">No staff name extracted</div>
+                    <div className="batch-group-dept">No staff name extracted — tap to add name</div>
                   </div>
                   <div className="batch-group-badge warn-badge">{batchData.unmatched.length}</div>
                 </div>
                 <div className="batch-group-docs">
                   {batchData.unmatched.map((doc) => (
-                    <div className="batch-group-doc" key={doc.index}>
-                      <span className="batch-doc-icon" style={{ background: "rgba(245,158,11,0.15)", color: "#f59e0b" }}>
-                        {getDocIcon(doc.document_type || "")}
-                      </span>
-                      <span className="batch-doc-type">
-                        {doc.document_label || doc.source_name}
-                      </span>
-                      <span className="batch-doc-source">{doc.source_name}</span>
+                    <div key={doc.index}>
+                      <div
+                        className={`batch-group-doc ${expandedDoc === doc.index ? "expanded" : ""}`}
+                        onClick={() => setExpandedDoc(expandedDoc === doc.index ? null : doc.index)}
+                      >
+                        <span className="batch-doc-icon" style={{ background: "rgba(245,158,11,0.15)", color: "#f59e0b" }}>
+                          {getDocIcon(doc.document_type || "")}
+                        </span>
+                        <span className="batch-doc-type">{doc.document_label || doc.source_name}</span>
+                        <svg className="batch-doc-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 9l6 6 6-6"/></svg>
+                      </div>
+                      {expandedDoc === doc.index && (
+                        <div className="batch-doc-edit">
+                          <div className="batch-field-row">
+                            <label>name</label>
+                            <input type="text" placeholder="Enter staff name" value={getField(doc.index, "name", doc.fields?.name || "")} onChange={(e) => updateField(doc.index, "name", e.target.value)} onClick={(e) => e.stopPropagation()} />
+                          </div>
+                          <div className="batch-field-row">
+                            <label>department</label>
+                            <input type="text" placeholder="Enter department" value={getField(doc.index, "department", doc.fields?.department || "")} onChange={(e) => updateField(doc.index, "department", e.target.value)} onClick={(e) => e.stopPropagation()} />
+                          </div>
+                          {doc.fields && Object.entries(doc.fields).filter(([k]) => k !== "name" && k !== "department").map(([key, val]) => (
+                            <div className="batch-field-row" key={key}>
+                              <label>{key.replace(/_/g, " ")}</label>
+                              <input type="text" value={getField(doc.index, key, val)} onChange={(e) => updateField(doc.index, key, e.target.value)} onClick={(e) => e.stopPropagation()} />
+                            </div>
+                          ))}
+                          <button className="batch-ai-btn" onClick={(e) => { e.stopPropagation(); handleAiClean(doc); }} disabled={!!aiCleaning[doc.index]}>
+                            {aiCleaning[doc.index] ? <><span className="batch-btn-spinner" /> Cleaning...</> : <>✨ AI Clean Fields</>}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -439,15 +567,10 @@ export default function BatchReviewPage() {
               disabled={committing || totalGroups === 0}
             >
               {committing ? (
-                <>
-                  <span className="batch-btn-spinner" />
-                  Saving...
-                </>
+                <><span className="batch-btn-spinner" /> Saving...</>
               ) : (
                 <>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M20 6L9 17l-5-5"/>
-                  </svg>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 6L9 17l-5-5"/></svg>
                   Save All to Database ({totalDocs} documents → {totalGroups} staff)
                 </>
               )}

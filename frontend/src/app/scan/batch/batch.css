@@ -690,3 +690,152 @@
 .batch-action-btn.primary:hover {
   transform: translateY(-1px);
 }
+
+/* ============================
+   EDITING & AI CLEAN
+   ============================ */
+.batch-group-doc {
+  cursor: pointer;
+}
+
+.batch-doc-chevron {
+  color: var(--text-muted);
+  transition: transform 200ms;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.batch-group-doc.expanded .batch-doc-chevron {
+  transform: rotate(180deg);
+}
+
+.batch-group-doc.expanded {
+  background: var(--bg-hover);
+}
+
+.batch-doc-edit {
+  padding: 8px 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: slideDown 200ms ease;
+  border-top: 1px solid var(--border);
+  margin: 0 8px;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; max-height: 0; }
+  to { opacity: 1; max-height: 600px; }
+}
+
+.batch-field-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.batch-field-row label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  min-width: 80px;
+  flex-shrink: 0;
+}
+
+.batch-field-row input {
+  flex: 1;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  outline: none;
+  transition: all 150ms;
+}
+
+.batch-field-row input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.batch-field-row input::placeholder {
+  color: var(--text-muted);
+}
+
+.batch-ai-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: linear-gradient(135deg, rgba(139,92,246,0.12), rgba(99,102,241,0.12));
+  border: 1px solid rgba(139,92,246,0.25);
+  border-radius: var(--radius-sm);
+  color: var(--purple);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 150ms;
+  margin-top: 4px;
+  align-self: flex-end;
+}
+
+.batch-ai-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(139,92,246,0.2), rgba(99,102,241,0.2));
+  border-color: rgba(139,92,246,0.4);
+}
+
+.batch-ai-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.batch-ai-btn .batch-btn-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(139,92,246,0.2);
+  border-top-color: var(--purple);
+}
+
+/* AI Clean All button in summary bar */
+.batch-ai-all-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: linear-gradient(135deg, var(--purple), var(--accent));
+  border: none;
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 150ms;
+  margin-left: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.batch-ai-all-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 12px rgba(139,92,246,0.3);
+}
+
+.batch-ai-all-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.batch-ai-all-btn .batch-btn-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+}
