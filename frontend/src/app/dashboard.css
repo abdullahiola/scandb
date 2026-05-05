@@ -248,6 +248,11 @@
   color: var(--green);
 }
 
+.batch-action .dash-action-icon {
+  background: linear-gradient(135deg, rgba(245,158,11,0.15), rgba(249,115,22,0.15));
+  color: var(--yellow);
+}
+
 .dash-action-info {
   flex: 1;
 }

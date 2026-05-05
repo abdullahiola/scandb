@@ -164,7 +164,24 @@ export default function Dashboard() {
             </div>
             <div className="dash-action-info">
               <strong>New Scan</strong>
-              <span>Scan or upload documents</span>
+              <span>Scan a single document</span>
+            </div>
+            <svg className="dash-action-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M9 18l6-6-6-6" />
+            </svg>
+          </Link>
+          <Link href="/scan/batch" className="dash-action-card batch-action">
+            <div className="dash-action-icon">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
+                <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
+                <line x1="6" y1="6" x2="6.01" y2="6" />
+                <line x1="6" y1="18" x2="6.01" y2="18" />
+              </svg>
+            </div>
+            <div className="dash-action-info">
+              <strong>Batch Scan</strong>
+              <span>Upload 100+ docs from printer</span>
             </div>
             <svg className="dash-action-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M9 18l6-6-6-6" />

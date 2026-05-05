@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import init_db
 from app.services.classifier import DOCUMENT_TYPES
-from app.routes import scan, staff, documents, export
+from app.routes import scan, staff, documents, export, batch
 
 # =============================================
 # APP SETUP
@@ -37,6 +37,7 @@ app.include_router(scan.router)
 app.include_router(staff.router)
 app.include_router(documents.router)
 app.include_router(export.router)
+app.include_router(batch.router)
 
 
 @app.get("/health")
