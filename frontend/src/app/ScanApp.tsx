@@ -28,6 +28,9 @@ interface ScanResult {
   aiCleaning: boolean;
   showRawText: boolean;
   editMode: boolean;
+  originalFields: ParsedField[];
+  aiFieldsCleaned: boolean;
+  aiFieldsCleaning: boolean;
 }
 
 interface StaffRecord {
@@ -329,6 +332,9 @@ export default function ScanApp() {
           aiCleaning: false,
           showRawText: false,
           editMode: scanResult.is_form || false,
+          originalFields: fields.map(f => ({ ...f })),
+          aiFieldsCleaned: false,
+          aiFieldsCleaning: false,
         });
 
         setProgress(Math.round(fileBaseProgress + fileProgressRange));
@@ -351,6 +357,9 @@ export default function ScanApp() {
           aiCleaning: false,
           showRawText: false,
           editMode: false,
+          originalFields: [],
+          aiFieldsCleaned: false,
+          aiFieldsCleaning: false,
         });
       }
     }
@@ -454,6 +463,78 @@ export default function ScanApp() {
       setResults(prev =>
         prev.map((r, ri) =>
           ri === resultIndex ? { ...r, aiCleaning: false } : r
+        )
+      );
+    }
+  };
+
+  // === AI Clean fields per result ===
+  const handleAiCleanFields = async (resultIndex: number) => {
+    const result = results[resultIndex];
+
+    if (result.aiFieldsCleaned) {
+      // Toggle back to original fields
+      setResults(prev =>
+        prev.map((r, ri) =>
+          ri === resultIndex
+            ? { ...r, parsedFields: [...r.originalFields], aiFieldsCleaned: false }
+            : r
+        )
+      );
+      return;
+    }
+
+    // Set loading
+    setResults(prev =>
+      prev.map((r, ri) =>
+        ri === resultIndex ? { ...r, aiFieldsCleaning: true } : r
+      )
+    );
+
+    try {
+      // Build fields object
+      const fieldsObj: Record<string, string> = {};
+      result.parsedFields.forEach(f => {
+        fieldsObj[f.key] = f.value;
+      });
+
+      const res = await fetch("/api/ai-clean-fields", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fields: fieldsObj,
+          documentType: result.documentType,
+          rawText: result.originalRawText,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "AI field cleaning failed");
+      }
+
+      const data = await res.json();
+      const cleanedFields = data.fields;
+
+      // Update parsed fields with cleaned values
+      const updatedFields = result.parsedFields.map(f => ({
+        ...f,
+        value: cleanedFields[f.key] !== undefined ? cleanedFields[f.key] : f.value,
+      }));
+
+      setResults(prev =>
+        prev.map((r, ri) =>
+          ri === resultIndex
+            ? { ...r, parsedFields: updatedFields, aiFieldsCleaned: true, aiFieldsCleaning: false }
+            : r
+        )
+      );
+      showToast("Fields cleaned with AI ✨");
+    } catch (err: any) {
+      showToast(err.message || "AI field cleaning failed");
+      setResults(prev =>
+        prev.map((r, ri) =>
+          ri === resultIndex ? { ...r, aiFieldsCleaning: false } : r
         )
       );
     }
@@ -947,6 +1028,24 @@ export default function ScanApp() {
                     </svg>
                     {activeResult.editMode ? "Done" : "Edit"}
                   </button>
+                  <div className="ai-clean-bar" style={{ marginLeft: "auto" }}>
+                    <div className="ai-clean-label">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2z"/>
+                      </svg>
+                      <span>AI Fields</span>
+                    </div>
+                    <button
+                      className={`ai-toggle-switch ${activeResult.aiFieldsCleaned ? "active" : ""} ${activeResult.aiFieldsCleaning ? "loading" : ""}`}
+                      onClick={() => handleAiCleanFields(activeIndex)}
+                      disabled={activeResult.aiFieldsCleaning}
+                      aria-label="Toggle AI field cleaning"
+                    >
+                      <div className="ai-toggle-knob">
+                        {activeResult.aiFieldsCleaning && <div className="ai-toggle-spinner" />}
+                      </div>
+                    </button>
+                  </div>
                 </div>
 
                 <div className="fields-grid">

@@ -17,3 +17,6 @@ backend/data/
 # OS
 .DS_Store
 *.swp
+
+# Template scans (large image files)
+templates/

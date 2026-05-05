@@ -1,4 +1,5 @@
 import io
+from typing import List
 
 from PIL import Image, ImageEnhance, ImageFilter
 import pytesseract
@@ -16,15 +17,23 @@ def preprocess_image(img: Image.Image) -> Image.Image:
     return gray.convert("RGB")
 
 
-def pdf_to_image(pdf_bytes: bytes, dpi: int = 300) -> Image.Image:
-    """Convert first page of PDF to PIL Image."""
+def pdf_to_images(pdf_bytes: bytes, dpi: int = 200) -> List[Image.Image]:
+    """Convert ALL pages of a PDF to PIL Images."""
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    page = doc[0]
+    images = []
     mat = fitz.Matrix(dpi / 72, dpi / 72)
-    pix = page.get_pixmap(matrix=mat)
-    img = Image.open(io.BytesIO(pix.tobytes("png")))
+    for page in doc:
+        pix = page.get_pixmap(matrix=mat)
+        img = Image.open(io.BytesIO(pix.tobytes("png")))
+        images.append(img)
     doc.close()
-    return img
+    return images
+
+
+def pdf_to_image(pdf_bytes: bytes, dpi: int = 200) -> Image.Image:
+    """Convert first page of PDF to PIL Image (legacy compat)."""
+    images = pdf_to_images(pdf_bytes, dpi)
+    return images[0] if images else Image.new("RGB", (100, 100), "white")
 
 
 def run_ocr(img: Image.Image, config: str = "") -> dict:

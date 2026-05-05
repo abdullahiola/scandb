@@ -7,18 +7,28 @@ def _extract_ref_number(text: str):
     Tries multiple patterns to capture ref numbers from OCR text.
     """
     patterns = [
-        r"Ref\.?\s*(?:No\.?)?\s*:?\s*(HR\s*[&8]\s*D[-\s/]*\S+[A-Z0-9/\-\.\s]*)",
-        r"(?:Our|Your)\s+Ref\.?\s*(?:No\.?)?\s*:?\s*([A-Z0-9][A-Z0-9\s&/\-\.]+)",
-        r"Ref\.?\s*(?:No\.?)?\s*:?\s*([A-Z0-9][A-Z0-9\s&/\-\.]{3,})",
-        r"Ref\.?\s*(?:No\.?)?\s*:?\s*\n\s*([A-Z0-9][A-Z0-9\s&/\-\.]{3,})",
+        # HR&D specific formats (stop at newline or comma)
+        r"Ref\.?\s*(?:No\.?)?\s*:?\s*(HR\s*[&8]\s*D[-\s/]*\S+[A-Z0-9/\-\. ]*?)(?:\n|,|$)",
+        r"(HR\s*[&8]\s*D[-\s/]*SS[/\-][A-Z0-9/\-\. ]+?)(?:\n|,|$)",
+        # Our/Your Ref (single line)
+        r"(?:Our|Your)\s+Ref\.?\s*(?:No\.?)?\s*:?\s*([A-Z0-9][A-Z0-9 &/\-\.]+?)(?:\n|,|$)",
+        # Generic Ref: or Ref No: (single line)
+        r"Ref\.?\s*(?:No\.?)?\s*:?\s*([A-Z0-9][A-Z0-9 &/\-\.]{3,}?)(?:\n|,|$)",
+        # Ref on next line
+        r"Ref\.?\s*(?:No\.?)?\s*:?\s*\n\s*([A-Z0-9][A-Z0-9 &/\-\.]{3,}?)(?:\n|,|$)",
+        # Common format like UI/xxx or PF/xxx
+        r"((?:UI|PF|REF)[/\-][A-Z0-9/\-\.]+)",
+        # Slash-separated codes
         r"Ref\w*\.?\s*:?\s*([A-Z]{2,}[/\-][A-Z0-9/\-\.]+)",
     ]
 
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
         if match:
-            val = match.group(1).strip().rstrip(".,;:")
-            if 2 < len(val) < 80:
+            # Take only the first line of the match and clean it
+            val = match.group(1).strip().split("\n")[0].strip().rstrip(".,;:")
+            # Skip if it's just a label or too short
+            if len(val) > 2 and len(val) < 80 and val.upper() not in ("REF", "REFERENCE", "REF NO"):
                 return match
     return None
 
@@ -58,15 +68,21 @@ def extract_fields_generic(text: str) -> dict:
 
     ref_match = _extract_ref_number(text)
     if ref_match:
-        fields["ref_number"] = ref_match.group(1).strip().rstrip(".,;:")
+        fields["ref_number"] = ref_match.group(1).strip().split("\n")[0].strip().rstrip(".,;:")
 
     name_match = re.search(r'^NAME\s*[,:\s]*\n?\s*(.+?)(?:\n|,)', text, re.MULTILINE)
     if name_match:
-        fields["name"] = name_match.group(1).strip()
+        val = name_match.group(1).strip()
+        # Skip if the 'name' is really a label like "Department" or too short
+        if val and val.upper() not in ('NAME', 'DEPARTMENT', 'DEPT', 'DATE', '') and len(val) > 1:
+            fields["name"] = val
 
-    dept_match = re.search(r'(?:Department|DEPARTMENT)\s*[,:\s]*\n?\s*(.+?)(?:\n|,)', text, re.IGNORECASE)
-    if dept_match:
-        fields["department"] = dept_match.group(1).strip()
+    dept = re.search(r'(?:Department|DEPARTMENT)[,:\s]*\n?\s*(.+?)(?:\n|,)', text, re.IGNORECASE)
+    if dept:
+        val = dept.group(1).strip()
+        # Skip if it matched the label itself or common noise
+        if val and val.upper() not in ('DEPARTMENT', 'DEPT', 'NAME', '') and len(val) > 1:
+            fields["department"] = val
 
     email_match = re.search(r'[\w.+-]+@[\w-]+\.[\w.]+', text)
     if email_match:
