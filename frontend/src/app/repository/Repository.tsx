@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { getDocIcon, getDocColor, getDocShortLabel, DOC_TYPES, ALL_DOC_TYPE_KEYS } from "@/constants/documentTypes";
 import "./repository.css";
 
 // ── Types ──────────────────────────────────────────────
@@ -29,28 +30,7 @@ interface Staff {
   documents: StaffDoc[];
 }
 
-const DOC_TYPE_ICONS: Record<string, string> = {
-  confirmation_of_appointment: "✅",
-  assumption_of_duty: "📋",
-  promotion_exercise: "🎉",
-  posting: "📍",
-  unknown: "📄",
-};
-
-const DOC_TYPE_COLORS: Record<string, string> = {
-  confirmation_of_appointment: "#10b981",
-  assumption_of_duty: "#3b82f6",
-  promotion_exercise: "#f59e0b",
-  posting: "#8b5cf6",
-  unknown: "#6b7280",
-};
-
-const DOC_TYPE_LABELS: Record<string, string> = {
-  confirmation_of_appointment: "Confirmation",
-  assumption_of_duty: "Assumption",
-  promotion_exercise: "Promotion",
-  posting: "Posting",
-};
+// Document type icons, colors, labels now from @/constants/documentTypes
 
 // ── Component ──────────────────────────────────────────
 export default function Repository() {
@@ -438,17 +418,17 @@ export default function Repository() {
             <div className="stat-label">Total Documents</div>
           </div>
         </div>
-        {Object.entries(typeCounts).slice(0, 4).map(([type, count]) => (
+        {Object.entries(typeCounts).slice(0, 6).map(([type, count]) => (
           <div className="stat-card" key={type}>
             <div className="stat-icon" style={{
-              background: (DOC_TYPE_COLORS[type] || "#6b7280") + "18",
-              color: DOC_TYPE_COLORS[type] || "#6b7280",
+              background: getDocColor(type) + "18",
+              color: getDocColor(type),
             }}>
-              {DOC_TYPE_ICONS[type] || "📄"}
+              {getDocIcon(type)}
             </div>
             <div className="stat-info">
               <div className="stat-value">{count}</div>
-              <div className="stat-label">{DOC_TYPE_LABELS[type] || type.replace(/_/g, " ")}</div>
+              <div className="stat-label">{getDocShortLabel(type)}</div>
             </div>
           </div>
         ))}
@@ -485,14 +465,14 @@ export default function Repository() {
             >
               All
             </button>
-            {Object.entries(DOC_TYPE_LABELS).map(([type, label]) => (
+            {ALL_DOC_TYPE_KEYS.map((type) => (
               <button
                 key={type}
                 className={`filter-chip ${typeFilter === type ? "active" : ""}`}
                 onClick={() => setTypeFilter(typeFilter === type ? null : type)}
               >
-                <span className="chip-icon">{DOC_TYPE_ICONS[type]}</span>
-                {label}
+                <span className="chip-icon">{getDocIcon(type)}</span>
+                {getDocShortLabel(type)}
               </button>
             ))}
           </div>
@@ -642,8 +622,8 @@ export default function Repository() {
                     selectedStaff.documents.map((doc) => {
                       const isExpanded = expandedDoc === doc.id;
                       const fields = parseFields(doc.extractedData);
-                      const docColor = DOC_TYPE_COLORS[doc.documentType] || "#6b7280";
-                      const docIcon = DOC_TYPE_ICONS[doc.documentType] || "📄";
+                      const docColor = getDocColor(doc.documentType);
+                      const docIcon = getDocIcon(doc.documentType);
 
                       return (
                         <div key={doc.id}>

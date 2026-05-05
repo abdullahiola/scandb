@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { getDocIcon, getDocColor, getDocShortLabel } from "@/constants/documentTypes";
 
 type AppState = "camera" | "preview" | "processing" | "results" | "saved";
 
@@ -50,22 +51,7 @@ interface StaffDocRecord {
   createdAt: string;
 }
 
-// Document type icons
-const DOC_TYPE_ICONS: Record<string, string> = {
-  confirmation_of_appointment: "✅",
-  assumption_of_duty: "📋",
-  promotion_exercise: "🎉",
-  posting: "📍",
-  unknown: "📄",
-};
-
-const DOC_TYPE_COLORS: Record<string, string> = {
-  confirmation_of_appointment: "#10b981",
-  assumption_of_duty: "#3b82f6",
-  promotion_exercise: "#f59e0b",
-  posting: "#8b5cf6",
-  unknown: "#6b7280",
-};
+// Document type icons & colors now from @/constants/documentTypes
 
 export default function ScanApp() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -925,8 +911,8 @@ export default function ScanApp() {
 
       {/* ===== RESULTS ===== */}
       {state === "results" && activeResult && (() => {
-        const docColor = DOC_TYPE_COLORS[activeResult.documentType] || DOC_TYPE_COLORS.unknown;
-        const docIcon = DOC_TYPE_ICONS[activeResult.documentType] || DOC_TYPE_ICONS.unknown;
+        const docColor = getDocColor(activeResult.documentType);
+        const docIcon = getDocIcon(activeResult.documentType);
 
         return (
           <div className="results-screen">
@@ -965,7 +951,7 @@ export default function ScanApp() {
                           onClick={() => setActiveIndex(i)}
                         >
                           <span className="doc-tab-icon">
-                            {DOC_TYPE_ICONS[r.documentType] || "📄"}
+                            {getDocIcon(r.documentType)}
                           </span>
                           <span className="doc-tab-label">{r.file.name.length > 12 ? r.file.name.slice(0, 12) + "…" : r.file.name}</span>
                         </button>
@@ -1201,7 +1187,7 @@ export default function ScanApp() {
                 {selectedStaff.documents.map(doc => (
                   <div key={doc.id} className="saved-doc-item">
                     <span className="saved-doc-icon">
-                      {DOC_TYPE_ICONS[doc.documentType] || "📄"}
+                      {getDocIcon(doc.documentType)}
                     </span>
                     <div className="saved-doc-info">
                       <span className="saved-doc-type">{doc.documentLabel || doc.documentType.replace(/_/g, " ")}</span>
