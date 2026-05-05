@@ -116,6 +116,9 @@ async def commit_batch(batch_id: str, req: dict = None):
         staff_updated = 0
         errors = []
 
+        # Cache staff lookups to avoid repeated queries for same name
+        staff_cache: dict = {}
+
         for item in job.items:
             if item.status != "done":
                 continue
@@ -140,28 +143,31 @@ async def commit_batch(batch_id: str, req: dict = None):
                 })
                 continue
 
-            # Find or create staff
-            c.execute("SELECT * FROM staff WHERE LOWER(name) = LOWER(?)", (name,))
-            staff_row = c.fetchone()
-
-            if staff_row is None:
-                c.execute(
-                    "INSERT INTO staff (name, department) VALUES (?, ?)",
-                    (name, department),
-                )
-                conn.commit()
-                staff_id = c.lastrowid
-                staff_created += 1
+            # Find or create staff (with cache)
+            name_lower = name.lower()
+            if name_lower in staff_cache:
+                staff_id = staff_cache[name_lower]
             else:
-                staff_id = staff_row["id"]
-                # Update department if we have one and they don't
-                if department and not staff_row["department"]:
+                c.execute("SELECT id, department FROM staff WHERE LOWER(name) = LOWER(?)", (name,))
+                staff_row = c.fetchone()
+
+                if staff_row is None:
                     c.execute(
-                        "UPDATE staff SET department = ?, updated_at = datetime('now') WHERE id = ?",
-                        (department, staff_id),
+                        "INSERT INTO staff (name, department) VALUES (?, ?)",
+                        (name, department),
                     )
-                    conn.commit()
-                staff_updated += 1
+                    staff_id = c.lastrowid
+                    staff_created += 1
+                else:
+                    staff_id = staff_row["id"]
+                    if department and not staff_row["department"]:
+                        c.execute(
+                            "UPDATE staff SET department = ?, updated_at = datetime('now') WHERE id = ?",
+                            (department, staff_id),
+                        )
+                    staff_updated += 1
+
+                staff_cache[name_lower] = staff_id
 
             # Save document
             extracted_json = json.dumps(item.fields)
@@ -182,15 +188,14 @@ async def commit_batch(batch_id: str, req: dict = None):
                     "reviewed",
                 ),
             )
-            conn.commit()
             saved_count += 1
 
-            # Update staff timestamp
-            c.execute(
-                "UPDATE staff SET updated_at = datetime('now') WHERE id = ?",
-                (staff_id,),
-            )
-            conn.commit()
+        # Update timestamps for all affected staff in one pass
+        for sid in set(staff_cache.values()):
+            c.execute("UPDATE staff SET updated_at = datetime('now') WHERE id = ?", (sid,))
+
+        # Single commit for entire batch
+        conn.commit()
 
         return {
             "success": True,
@@ -202,9 +207,11 @@ async def commit_batch(batch_id: str, req: dict = None):
         }
 
     except Exception as e:
+        conn.rollback()
         return JSONResponse(
             status_code=500,
             content={"error": f"Failed to commit batch: {str(e)}"},
         )
     finally:
         conn.close()
+

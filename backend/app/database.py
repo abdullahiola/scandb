@@ -55,6 +55,11 @@ def init_db():
         )
     """)
 
+    # Indexes for common queries
+    c.execute("CREATE INDEX IF NOT EXISTS idx_staff_name ON staff(name COLLATE NOCASE)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_staff_updated ON staff(updated_at DESC)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_docs_staff_id ON staff_documents(staff_id)")
+
     conn.commit()
     conn.close()
 

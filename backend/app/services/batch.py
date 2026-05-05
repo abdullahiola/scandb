@@ -102,12 +102,24 @@ def _process_single_item(item: BatchItem, img: Image.Image) -> None:
 
         custom_config = r'--psm 6 --oem 3'
 
-        # Dual-pass OCR
+        # Pass 1: Raw image captures headers/ref numbers preprocessing destroys
         raw_pass1 = pytesseract.image_to_string(img)
+
+        # Pass 2: Preprocessed image — use image_to_data only (it contains the text)
         processed = preprocess_image(img)
-        raw_pass2 = pytesseract.image_to_string(processed, config=custom_config)
         data = pytesseract.image_to_data(
             processed, output_type=pytesseract.Output.DICT, config=custom_config
+        )
+
+        # Reconstruct text from data output (avoids redundant image_to_string call)
+        raw_pass2 = "\n".join(
+            " ".join(
+                data["text"][j]
+                for j in range(len(data["text"]))
+                if data["block_num"][j] == block and data["text"][j].strip()
+            )
+            for block in sorted(set(data["block_num"]))
+            if any(data["text"][j].strip() for j in range(len(data["text"])) if data["block_num"][j] == block)
         )
 
         # Merge header lines from raw pass
@@ -281,8 +293,6 @@ def batch_job_to_dict(job: BatchJob) -> dict:
                 "type_confidence": item.type_confidence,
                 "is_form": item.is_form,
                 "fields": item.fields,
-                "expected_fields": item.expected_fields,
-                "raw_text": item.raw_text,
                 "confidence": item.confidence,
                 "word_count": item.word_count,
                 "staff_group": item.staff_group,
