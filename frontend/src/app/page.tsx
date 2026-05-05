@@ -2,8 +2,8 @@
 
 import dynamic from "next/dynamic";
 
-const ScanApp = dynamic(() => import("./ScanApp"), { ssr: false });
+const Dashboard = dynamic(() => import("./Dashboard"), { ssr: false });
 
 export default function Home() {
-  return <ScanApp />;
+  return <Dashboard />;
 }
