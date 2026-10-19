@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
 export async function POST(req: NextRequest) {
   try {
@@ -13,27 +14,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!ANTHROPIC_API_KEY) {
+    if (!GEMINI_API_KEY) {
       return NextResponse.json(
         { error: "AI service not configured" },
         { status: 500 }
       );
     }
 
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 4096,
-        messages: [
-          {
-            role: "user",
-            content: `You are an OCR text cleaner. Clean up the following raw OCR text by:
+    const prompt = `You are an OCR text cleaner. Clean up the following raw OCR text by:
 1. Fixing obvious OCR errors (e.g., misread characters like 0/O, 1/l/I, rn/m)
 2. Fixing broken words and line breaks
 3. Correcting spacing issues
@@ -44,15 +32,26 @@ export async function POST(req: NextRequest) {
 Return ONLY the cleaned text, nothing else. No explanations, no preamble.
 
 Raw OCR text:
-${rawText}`,
-          },
-        ],
-      }),
-    });
+${rawText}`;
+
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": GEMINI_API_KEY,
+        },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 4096, temperature: 0 },
+        }),
+      }
+    );
 
     if (!res.ok) {
-      const err = await res.json();
-      console.error("Anthropic API error:", err);
+      const err = await res.json().catch(() => ({}));
+      console.error("Gemini API error:", err);
       return NextResponse.json(
         { error: "AI cleaning failed" },
         { status: 502 }
@@ -61,7 +60,14 @@ ${rawText}`,
 
     const data = await res.json();
     const cleanedText =
-      data.content?.[0]?.text || rawText;
+      data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+
+    if (!cleanedText) {
+      return NextResponse.json(
+        { error: "AI returned empty response" },
+        { status: 502 }
+      );
+    }
 
     return NextResponse.json({ cleanedText });
   } catch (e: any) {

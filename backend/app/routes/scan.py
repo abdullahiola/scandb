@@ -3,9 +3,8 @@ import io
 from fastapi import APIRouter, UploadFile, File
 from fastapi.responses import JSONResponse
 from PIL import Image
-import pytesseract
 
-from app.services.ocr import preprocess_image, pdf_to_image
+from app.services.ocr import run_ocr, pdf_to_image
 from app.services.jobs import start_job, get_job, resize_if_needed
 from app.services.classifier import (
     identify_document_type, extract_fields_for_type, DOCUMENT_TYPES,
@@ -37,21 +36,14 @@ async def scan_document_legacy(file: UploadFile = File(...)):
 
         img = resize_if_needed(img)
 
-        data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
-        raw_text = pytesseract.image_to_string(img)
-
-        confidences = [
-            int(c) for c, t in zip(data["conf"], data["text"])
-            if int(c) > 0 and t.strip()
-        ]
-        avg_confidence = sum(confidences) / len(confidences) if confidences else 0
+        ocr = run_ocr(img)
 
         return {
-            "raw_text": raw_text,
-            "confidence": round(avg_confidence, 1),
-            "fields": extract_fields_generic(raw_text),
+            "raw_text": ocr["raw_text"],
+            "confidence": ocr["confidence"],
+            "fields": extract_fields_generic(ocr["raw_text"]),
             "method": "regex",
-            "word_count": len([t for t in data["text"] if t.strip()]),
+            "word_count": ocr["word_count"],
         }
     except Exception as e:
         return JSONResponse(status_code=400, content={"error": f"Failed to process document: {str(e)}"})
@@ -96,37 +88,8 @@ async def scan_document(file: UploadFile = File(...)):
 
         img = resize_if_needed(img)
 
-        # --- Dual-pass OCR ---
-        # Pass 1: Raw image (captures headers/ref numbers that preprocessing destroys)
-        raw_text_pass1 = pytesseract.image_to_string(img)
-
-        # Pass 2: Preprocessed image (better for body text, handwriting)
-        processed = preprocess_image(img)
-        custom_config = r'--psm 6 --oem 3'
-        raw_text_pass2 = pytesseract.image_to_string(processed, config=custom_config)
-        data = pytesseract.image_to_data(processed, output_type=pytesseract.Output.DICT, config=custom_config)
-
-        # Merge: use pass2 as primary, but prepend any header lines from pass1
-        # that were lost in preprocessing (e.g., Ref numbers)
-        import re
-        header_lines = []
-        for line in raw_text_pass1.split("\n")[:5]:
-            line = line.strip()
-            if line and re.search(r'(?:Ref|HR[&8]D|UI/|PF/)', line, re.IGNORECASE):
-                # Check if this line already exists in pass2
-                if line not in raw_text_pass2:
-                    header_lines.append(line)
-
-        if header_lines:
-            raw_text = "\n".join(header_lines) + "\n" + raw_text_pass2
-        else:
-            raw_text = raw_text_pass2
-
-        confidences = [
-            int(c) for c, t in zip(data["conf"], data["text"])
-            if int(c) > 0 and t.strip()
-        ]
-        avg_confidence = sum(confidences) / len(confidences) if confidences else 0
+        ocr = run_ocr(img)
+        raw_text = ocr["raw_text"]
 
         doc_info = identify_document_type(raw_text)
         extracted_fields = extract_fields_for_type(raw_text, doc_info["type"])
@@ -139,7 +102,7 @@ async def scan_document(file: UploadFile = File(...)):
 
         return {
             "raw_text": raw_text,
-            "confidence": round(avg_confidence, 1),
+            "confidence": ocr["confidence"],
             "document_type": doc_info["type"],
             "document_label": doc_info["label"],
             "type_confidence": doc_info["confidence"],
@@ -147,7 +110,7 @@ async def scan_document(file: UploadFile = File(...)):
             "fields": extracted_fields,
             "expected_fields": DOCUMENT_TYPES.get(doc_info["type"], {}).get("fields", []),
             "method": "regex",
-            "word_count": len([t for t in data["text"] if t.strip()]),
+            "word_count": ocr["word_count"],
             "page_count": 1,
         }
     except Exception as e:

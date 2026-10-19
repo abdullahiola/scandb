@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
 export async function POST(req: NextRequest) {
   try {
@@ -13,7 +14,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!ANTHROPIC_API_KEY) {
+    if (!GEMINI_API_KEY) {
       return NextResponse.json(
         { error: "AI service not configured" },
         { status: 500 }
@@ -25,20 +26,7 @@ export async function POST(req: NextRequest) {
       .map(([key, value]) => `- ${key}: "${value}"`)
       .join("\n");
 
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 2048,
-        messages: [
-          {
-            role: "user",
-            content: `You are a document data extraction AI. I have a ${documentType || "scanned"} document. The following fields were extracted via OCR and regex, but may contain errors, partial values, or garbage characters.
+    const prompt = `You are a document data extraction AI. I have a ${documentType || "scanned"} document. The following fields were extracted via OCR and regex, but may contain errors, partial values, or garbage characters.
 
 Your job:
 1. Fix OCR errors in field values (e.g., misread characters like 0/O, 1/l/I, rn/m)
@@ -58,15 +46,30 @@ ${(rawText || "").slice(0, 2000)}
 Here are the extracted fields to clean:
 ${fieldEntries}
 
-Return ONLY a valid JSON object with the same keys and cleaned values. No explanations, no markdown code blocks, just the JSON object.`,
+Return ONLY a valid JSON object with the same keys and cleaned values. No explanations, no markdown code blocks, just the JSON object.`;
+
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": GEMINI_API_KEY,
+        },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            maxOutputTokens: 2048,
+            temperature: 0,
+            responseMimeType: "application/json",
           },
-        ],
-      }),
-    });
+        }),
+      }
+    );
 
     if (!res.ok) {
-      const err = await res.json();
-      console.error("Anthropic API error:", err);
+      const err = await res.json().catch(() => ({}));
+      console.error("Gemini API error:", err);
       return NextResponse.json(
         { error: "AI field cleaning failed" },
         { status: 502 }
@@ -74,7 +77,7 @@ Return ONLY a valid JSON object with the same keys and cleaned values. No explan
     }
 
     const data = await res.json();
-    const responseText = data.content?.[0]?.text || "{}";
+    const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
 
     // Parse the JSON response
     let cleanedFields: Record<string, string>;

@@ -13,9 +13,8 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 
 from PIL import Image
-import pytesseract
 
-from app.services.ocr import preprocess_image, pdf_to_images
+from app.services.ocr import run_ocr, pdf_to_images
 from app.services.classifier import identify_document_type, extract_fields_for_type, DOCUMENT_TYPES
 from app.utils.fields import clean_field_value
 
@@ -100,47 +99,8 @@ def _process_single_item(item: BatchItem, img: Image.Image) -> None:
         if img.mode != "RGB":
             img = img.convert("RGB")
 
-        custom_config = r'--psm 6 --oem 3'
-
-        # Pass 1: Raw image captures headers/ref numbers preprocessing destroys
-        raw_pass1 = pytesseract.image_to_string(img)
-
-        # Pass 2: Preprocessed image — use image_to_data only (it contains the text)
-        processed = preprocess_image(img)
-        data = pytesseract.image_to_data(
-            processed, output_type=pytesseract.Output.DICT, config=custom_config
-        )
-
-        # Reconstruct text from data output (avoids redundant image_to_string call)
-        raw_pass2 = "\n".join(
-            " ".join(
-                data["text"][j]
-                for j in range(len(data["text"]))
-                if data["block_num"][j] == block and data["text"][j].strip()
-            )
-            for block in sorted(set(data["block_num"]))
-            if any(data["text"][j].strip() for j in range(len(data["text"])) if data["block_num"][j] == block)
-        )
-
-        # Merge header lines from raw pass
-        header_lines = []
-        for line in raw_pass1.split("\n")[:5]:
-            line = line.strip()
-            if line and re.search(r'(?:Ref|HR[&D]|UI/|PF/)', line, re.IGNORECASE):
-                if line not in raw_pass2:
-                    header_lines.append(line)
-
-        if header_lines:
-            raw_text = "\n".join(header_lines) + "\n" + raw_pass2
-        else:
-            raw_text = raw_pass2
-
-        # Confidence
-        confidences = [
-            int(c) for c, t in zip(data["conf"], data["text"])
-            if int(c) > 0 and t.strip()
-        ]
-        avg_confidence = sum(confidences) / len(confidences) if confidences else 0
+        ocr = run_ocr(img)
+        raw_text = ocr["raw_text"]
 
         # Classify and extract
         doc_info = identify_document_type(raw_text)
@@ -160,8 +120,8 @@ def _process_single_item(item: BatchItem, img: Image.Image) -> None:
         item.fields = extracted_fields
         item.expected_fields = DOCUMENT_TYPES.get(doc_info["type"], {}).get("fields", [])
         item.raw_text = raw_text
-        item.confidence = round(avg_confidence, 1)
-        item.word_count = len([t for t in data["text"] if t.strip()])
+        item.confidence = ocr["confidence"]
+        item.word_count = ocr["word_count"]
 
         # Extract staff name for grouping
         name = extracted_fields.get("name", "").strip()
@@ -186,40 +146,78 @@ def _normalize_name(name: str) -> str:
     return name.title()
 
 
-def _run_batch(job: BatchJob, images: List[tuple]) -> None:
+def _run_batch_lazy(job: BatchJob, page_loader, total: int) -> None:
     """
-    Process all images in a batch using a thread pool.
-    images: list of (index, source_name, PIL.Image)
+    Process documents lazily — only load images as workers need them.
+    page_loader: callable(index) -> (source_name, PIL.Image) or None
+    total: total number of items
     """
     try:
         job.status = "processing"
-        job.total_items = len(images)
-        job.current_step = f"Processing {len(images)} documents"
+        job.total_items = total
+        job.current_step = f"Processing {total} documents"
 
-        # Create batch items
-        for idx, source_name, _ in images:
-            item = BatchItem(index=idx, source_name=source_name)
-            job.items.append(item)
+        # Pre-create all items
+        for i in range(total):
+            job.items.append(BatchItem(index=i, source_name=f"page_{i+1}"))
 
-        # Process with thread pool
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-            futures = {}
-            for (idx, source_name, img), item in zip(images, job.items):
-                future = pool.submit(_process_single_item, item, img)
-                futures[future] = item
+        # Use a queue to feed images to workers lazily
+        import queue
+        work_queue: queue.Queue = queue.Queue(maxsize=MAX_WORKERS + 1)
 
-            for future in as_completed(futures):
-                item = futures[future]
+        def _producer():
+            """Load images one at a time and put into queue."""
+            for i in range(total):
                 try:
-                    future.result()
+                    result = page_loader(i)
+                    if result:
+                        name, img = result
+                        job.items[i].source_name = name
+                        work_queue.put((i, img))
+                    else:
+                        job.items[i].status = "error"
+                        job.items[i].error = "Failed to load"
                 except Exception as e:
-                    item.status = "error"
-                    item.error = str(e)
+                    job.items[i].status = "error"
+                    job.items[i].error = str(e)
+            # Signal done
+            for _ in range(MAX_WORKERS):
+                work_queue.put(None)
 
-                job.completed_items = sum(
-                    1 for i in job.items if i.status in ("done", "error")
-                )
-                job.current_step = f"Processed {job.completed_items}/{job.total_items}"
+        def _consumer():
+            """Pull images from queue and process them."""
+            while True:
+                task = work_queue.get()
+                if task is None:
+                    break
+                idx, img = task
+                try:
+                    _process_single_item(job.items[idx], img)
+                except Exception as e:
+                    job.items[idx].status = "error"
+                    job.items[idx].error = str(e)
+                finally:
+                    del img  # Release memory immediately
+                    job.completed_items = sum(
+                        1 for it in job.items if it.status in ("done", "error")
+                    )
+                    job.current_step = f"Processed {job.completed_items}/{job.total_items}"
+
+        # Start producer
+        producer = threading.Thread(target=_producer, daemon=True)
+        producer.start()
+
+        # Start consumer workers
+        consumers = []
+        for _ in range(MAX_WORKERS):
+            t = threading.Thread(target=_consumer, daemon=True)
+            t.start()
+            consumers.append(t)
+
+        # Wait for all to finish
+        producer.join()
+        for t in consumers:
+            t.join()
 
         job.status = "done"
         job.current_step = "Complete"
@@ -231,19 +229,31 @@ def _run_batch(job: BatchJob, images: List[tuple]) -> None:
 
 
 def start_batch_from_pdf(job: BatchJob, pdf_bytes: bytes, filename: str) -> None:
-    """Split a PDF into pages and process each as a batch item."""
+    """Split a PDF into pages and process each lazily (one page at a time)."""
     def _worker():
         try:
-            job.current_step = "Splitting PDF into pages..."
-            pages = pdf_to_images(pdf_bytes)
-            images = [
-                (i, f"{filename}_page_{i+1}", page)
-                for i, page in enumerate(pages)
-            ]
-            _run_batch(job, images)
+            import fitz
+            job.current_step = "Reading PDF..."
+            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            total = len(doc)
+            mat = fitz.Matrix(200 / 72, 200 / 72)  # 200 DPI
+
+            def load_page(i: int):
+                """Convert a single PDF page to PIL — only when needed."""
+                page = doc[i]
+                pix = page.get_pixmap(matrix=mat)
+                img = Image.open(io.BytesIO(pix.tobytes("png")))
+                if img.mode != "RGB":
+                    img = img.convert("RGB")
+                return (f"{filename}_page_{i+1}", img)
+
+            _run_batch_lazy(job, load_page, total)
+            doc.close()
+            del pdf_bytes  # Release the PDF bytes
+
         except Exception as e:
             job.status = "error"
-            job.error = f"Failed to split PDF: {str(e)}"
+            job.error = f"Failed to process PDF: {str(e)}"
 
     thread = threading.Thread(target=_worker, daemon=True)
     thread.start()
@@ -251,24 +261,27 @@ def start_batch_from_pdf(job: BatchJob, pdf_bytes: bytes, filename: str) -> None
 
 def start_batch_from_images(job: BatchJob, image_list: List[tuple]) -> None:
     """
-    Process a list of image files as a batch.
+    Process a list of image files lazily.
     image_list: [(filename, bytes), ...]
     """
     def _worker():
         try:
-            job.current_step = "Loading images..."
-            images = []
-            for i, (filename, file_bytes) in enumerate(image_list):
-                if filename.lower().endswith(".pdf"):
-                    # Individual PDF — take first page
+            total = len(image_list)
+
+            def load_image(i: int):
+                """Load a single image — only when needed."""
+                fname, file_bytes = image_list[i]
+                if fname.lower().endswith(".pdf"):
                     from app.services.ocr import pdf_to_image
                     img = pdf_to_image(file_bytes)
                 else:
                     img = Image.open(io.BytesIO(file_bytes))
                 if img.mode != "RGB":
                     img = img.convert("RGB")
-                images.append((i, filename, img))
-            _run_batch(job, images)
+                return (fname, img)
+
+            _run_batch_lazy(job, load_image, total)
+
         except Exception as e:
             job.status = "error"
             job.error = f"Failed to load images: {str(e)}"

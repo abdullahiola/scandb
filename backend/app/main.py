@@ -11,13 +11,7 @@ from app.routes import scan, staff, documents, export, batch
 # APP SETUP
 # =============================================
 
-try:
-    import anthropic
-    HAS_ANTHROPIC = True
-except ImportError:
-    HAS_ANTHROPIC = False
-
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 app = FastAPI(title="ScanDB API")
 
@@ -44,6 +38,6 @@ app.include_router(batch.router)
 async def health():
     return {
         "status": "ok",
-        "ai_enabled": bool(HAS_ANTHROPIC and ANTHROPIC_API_KEY),
+        "ai_enabled": bool(GEMINI_API_KEY),
         "document_types": list(DOCUMENT_TYPES.keys()),
     }

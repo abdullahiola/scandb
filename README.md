@@ -16,7 +16,7 @@ scandb/
 │   │   │   ├── documents.py # Document update/delete
 │   │   │   └── export.py    # DB export endpoints
 │   │   ├── services/        # Business logic
-│   │   │   ├── ocr.py       # Tesseract OCR + preprocessing
+│   │   │   ├── ocr.py       # PaddleOCR (PP-OCRv5) engine
 │   │   │   └── classifier.py # Document type identification
 │   │   └── utils/
 │   │       └── fields.py    # Field extraction helpers
@@ -40,10 +40,10 @@ scandb/
 |-------|-----------|
 | **Frontend** | Next.js 16, TypeScript |
 | **Backend** | FastAPI, Python 3.11 |
-| **OCR** | Tesseract via pytesseract |
+| **OCR** | PaddleOCR (PP-OCRv5) |
 | **PDF Processing** | PyMuPDF (fitz) |
 | **Database** | SQLite3 |
-| **AI Text Clean** | Claude API (optional) |
+| **AI Text Clean** | Google Gemini API (optional, free tier) |
 
 ## Features
 
@@ -51,7 +51,7 @@ scandb/
 - 🔍 OCR text extraction with image preprocessing
 - 📋 Automatic document classification (Confirmation, Assumption, Promotion, Posting)
 - ✏️ Editable extracted fields
-- 🧠 AI-powered text cleaning (optional, requires Anthropic API key)
+- 🧠 AI-powered text cleaning (optional, free Gemini API key)
 - 👥 Staff records with document management
 - 📦 SQLite database export
 - 🎨 Glassmorphism dark UI
@@ -64,19 +64,7 @@ scandb/
 
 - **Python 3.11+** with `pip`
 - **Node.js 20+** with `npm`
-- **Tesseract OCR** installed on your system
-
-#### Install Tesseract
-
-```bash
-# macOS
-brew install tesseract
-
-# Ubuntu/Debian
-sudo apt-get install tesseract-ocr
-
-# Windows — download from https://github.com/UB-Mannheim/tesseract/wiki
-```
+OCR is handled by **PaddleOCR** — installed automatically via `pip install -r requirements.txt`. Model files (~30MB) download on the first scan; the Docker image pre-downloads them at build time.
 
 ---
 
@@ -114,7 +102,7 @@ npm install
 echo 'BACKEND_URL="http://localhost:8000"' > .env
 
 # Optional: add AI cleaning support
-echo 'ANTHROPIC_API_KEY="your-key-here"' >> .env
+echo 'GEMINI_API_KEY="your-key-here"' >> .env   # free at https://aistudio.google.com/apikey
 
 # Run the frontend
 npm run dev
@@ -136,7 +124,7 @@ Frontend runs at **http://localhost:3000**
 
 ```bash
 # .env
-ANTHROPIC_API_KEY=your-anthropic-api-key-here
+GEMINI_API_KEY=your-gemini-api-key-here
 ```
 
 #### 2. Build and run
@@ -213,7 +201,8 @@ docker ps
 | Variable | Required | Where | Description |
 |----------|----------|-------|-------------|
 | `BACKEND_URL` | Yes | Frontend `.env` | Backend API URL (default: `http://localhost:8000`) |
-| `ANTHROPIC_API_KEY` | No | Root `.env` | Enables AI text cleaning feature |
+| `GEMINI_API_KEY` | No | Root `.env` | Enables AI text cleaning/parsing (free key from [Google AI Studio](https://aistudio.google.com/apikey)) |
+| `GEMINI_MODEL` | No | Root `.env` | Gemini model to use (default: `gemini-2.5-flash`; use `gemini-2.5-flash-lite` for higher free-tier limits) |
 
 ---
 

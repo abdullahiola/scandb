@@ -12,9 +12,8 @@ from dataclasses import dataclass, field
 from typing import Dict, Optional, Any
 
 from PIL import Image
-import pytesseract
 
-from app.services.ocr import preprocess_image, pdf_to_images
+from app.services.ocr import run_ocr, pdf_to_images
 from app.services.classifier import identify_document_type, extract_fields_for_type, DOCUMENT_TYPES
 from app.utils.fields import clean_field_value
 
@@ -89,7 +88,6 @@ def process_job(job: Job, file_bytes: bytes, filename: str):
         job.total_pages = len(pages)
         job.current_step = f"Processing {len(pages)} page(s)"
 
-        custom_config = r'--psm 6 --oem 3'
         all_text_parts = []
         all_confidences = []
         total_words = 0
@@ -102,39 +100,10 @@ def process_job(job: Job, file_bytes: bytes, filename: str):
             if page_img.mode != "RGB":
                 page_img = page_img.convert("RGB")
 
-            # Dual-pass for first page: raw pass captures headers/ref numbers
-            # that preprocessing destroys
-            import re as _re
-            if i == 0:
-                raw_pass1 = pytesseract.image_to_string(page_img)
-            else:
-                raw_pass1 = ""
-
-            processed = preprocess_image(page_img)
-            page_text = pytesseract.image_to_string(processed, config=custom_config)
-            page_data = pytesseract.image_to_data(
-                processed, output_type=pytesseract.Output.DICT, config=custom_config
-            )
-
-            # Merge header lines from raw pass into preprocessed result (first page only)
-            if raw_pass1:
-                header_lines = []
-                for line in raw_pass1.split("\n")[:5]:
-                    line = line.strip()
-                    if line and _re.search(r'(?:Ref|HR[&8]D|UI/|PF/)', line, _re.IGNORECASE):
-                        if line not in page_text:
-                            header_lines.append(line)
-                if header_lines:
-                    page_text = "\n".join(header_lines) + "\n" + page_text
-
-            all_text_parts.append(page_text)
-
-            page_confs = [
-                int(c) for c, t in zip(page_data["conf"], page_data["text"])
-                if int(c) > 0 and t.strip()
-            ]
-            all_confidences.extend(page_confs)
-            total_words += len([t for t in page_data["text"] if t.strip()])
+            ocr = run_ocr(page_img)
+            all_text_parts.append(ocr["raw_text"])
+            all_confidences.extend(ocr["line_scores"])
+            total_words += ocr["word_count"]
 
         job.pages_done = len(pages)
         job.current_step = "Classifying document"

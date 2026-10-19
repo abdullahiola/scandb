@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
+
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
 const SYSTEM_PROMPT = `You are a document data extraction assistant. Given raw OCR text from a scanned document, extract structured data based on the provided field schema.
 
@@ -19,14 +20,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No text provided" }, { status: 400 });
     }
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey || apiKey === "your-claude-api-key-here") {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
       // Fallback: regex-based parsing
       const parsed = regexParse(rawText, fields || []);
       return NextResponse.json({ parsed, method: "regex" });
     }
-
-    const client = new Anthropic({ apiKey });
 
     let fieldDescription = "";
     if (fields && fields.length > 0) {
@@ -40,18 +39,42 @@ export async function POST(request: NextRequest) {
 - For general documents: title, date, author, key_content, summary`;
     }
 
-    const message = await client.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 2000,
-      messages: [
-        {
-          role: "user",
-          content: `${SYSTEM_PROMPT}${fieldDescription}\n\nHere is the OCR text:\n\n---\n${rawText}\n---\n\nExtract the data and return as a JSON object:`,
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
         },
-      ],
-    });
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  text: `${SYSTEM_PROMPT}${fieldDescription}\n\nHere is the OCR text:\n\n---\n${rawText}\n---\n\nExtract the data and return as a JSON object:`,
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            maxOutputTokens: 2000,
+            temperature: 0,
+            responseMimeType: "application/json",
+          },
+        }),
+      }
+    );
 
-    const responseText = message.content[0].type === "text" ? message.content[0].text : "";
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.error("Gemini API error:", err);
+      const parsed = regexParse(rawText, fields || []);
+      return NextResponse.json({ parsed, method: "regex-fallback" });
+    }
+
+    const data = await res.json();
+    const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
     
     // Try to parse the JSON from the response
     let parsed: Record<string, string> = {};
