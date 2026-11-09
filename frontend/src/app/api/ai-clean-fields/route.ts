@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+import { extractJsonObject, generateText, isAIConfigured } from "@/lib/llm";
 
 export async function POST(req: NextRequest) {
   try {
@@ -14,7 +12,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!GEMINI_API_KEY) {
+    if (!isAIConfigured()) {
       return NextResponse.json(
         { error: "AI service not configured" },
         { status: 500 }
@@ -48,47 +46,19 @@ ${fieldEntries}
 
 Return ONLY a valid JSON object with the same keys and cleaned values. No explanations, no markdown code blocks, just the JSON object.`;
 
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": GEMINI_API_KEY,
-        },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            maxOutputTokens: 2048,
-            temperature: 0,
-            responseMimeType: "application/json",
-          },
-        }),
-      }
-    );
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      console.error("Gemini API error:", err);
+    let responseText: string;
+    try {
+      responseText = await generateText(prompt, { json: true, maxTokens: 2048 });
+    } catch (e) {
+      console.error("LLM error:", e);
       return NextResponse.json(
         { error: "AI field cleaning failed" },
         { status: 502 }
       );
     }
 
-    const data = await res.json();
-    const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-
-    // Parse the JSON response
-    let cleanedFields: Record<string, string>;
-    try {
-      // Strip any markdown code block wrapper if present
-      const jsonStr = responseText
-        .replace(/^```json?\s*/i, "")
-        .replace(/```\s*$/, "")
-        .trim();
-      cleanedFields = JSON.parse(jsonStr);
-    } catch {
+    const cleanedFields = extractJsonObject<Record<string, string>>(responseText);
+    if (!cleanedFields) {
       console.error("Failed to parse AI response:", responseText);
       return NextResponse.json(
         { error: "AI returned invalid response" },

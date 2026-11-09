@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+import { generateText, isAIConfigured } from "@/lib/llm";
 
 export async function POST(req: NextRequest) {
   try {
@@ -14,7 +12,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!GEMINI_API_KEY) {
+    if (!isAIConfigured()) {
       return NextResponse.json(
         { error: "AI service not configured" },
         { status: 500 }
@@ -34,33 +32,16 @@ Return ONLY the cleaned text, nothing else. No explanations, no preamble.
 Raw OCR text:
 ${rawText}`;
 
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": GEMINI_API_KEY,
-        },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { maxOutputTokens: 4096, temperature: 0 },
-        }),
-      }
-    );
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      console.error("Gemini API error:", err);
+    let cleanedText: string;
+    try {
+      cleanedText = await generateText(prompt, { maxTokens: 4096 });
+    } catch (e) {
+      console.error("LLM error:", e);
       return NextResponse.json(
         { error: "AI cleaning failed" },
         { status: 502 }
       );
     }
-
-    const data = await res.json();
-    const cleanedText =
-      data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
 
     if (!cleanedText) {
       return NextResponse.json(

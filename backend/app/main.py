@@ -12,6 +12,7 @@ from app.routes import scan, staff, documents, export, batch
 # =============================================
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "")
 
 app = FastAPI(title="ScanDB API")
 
@@ -38,6 +39,7 @@ app.include_router(batch.router)
 async def health():
     return {
         "status": "ok",
-        "ai_enabled": bool(GEMINI_API_KEY),
+        "ai_enabled": bool(GEMINI_API_KEY or OLLAMA_URL),
+        "ai_provider": "ollama" if OLLAMA_URL else ("gemini" if GEMINI_API_KEY else None),
         "document_types": list(DOCUMENT_TYPES.keys()),
     }

@@ -43,7 +43,7 @@ scandb/
 | **OCR** | PaddleOCR (PP-OCRv5) |
 | **PDF Processing** | PyMuPDF (fitz) |
 | **Database** | SQLite3 |
-| **AI Text Clean** | Google Gemini API (optional, free tier) |
+| **AI Text Clean** | Local LLM via Ollama (Docker default) or Google Gemini API |
 
 ## Features
 
@@ -51,7 +51,7 @@ scandb/
 - 🔍 OCR text extraction with image preprocessing
 - 📋 Automatic document classification (Confirmation, Assumption, Promotion, Posting)
 - ✏️ Editable extracted fields
-- 🧠 AI-powered text cleaning (optional, free Gemini API key)
+- 🧠 AI-powered text cleaning (local Ollama model in Docker, or a free Gemini API key)
 - 👥 Staff records with document management
 - 📦 SQLite database export
 - 🎨 Glassmorphism dark UI
@@ -120,18 +120,31 @@ Frontend runs at **http://localhost:3000**
 
 ### Docker Deployment
 
-#### 1. Create `.env` in the project root
+The compose file starts three services: the OCR backend, the frontend and an
+**Ollama** container that serves a local LLM, so AI cleaning works with no API key.
+
+#### 1. (Optional) Create `.env` in the project root
 
 ```bash
-# .env
-GEMINI_API_KEY=your-gemini-api-key-here
+cp .env.example .env
 ```
+
+Defaults work out of the box. Edit `.env` to pick a different model (`OLLAMA_MODEL`)
+or to use Gemini instead (`GEMINI_API_KEY` + `LLM_PROVIDER=gemini`).
+
+| VPS RAM | Suggested `OLLAMA_MODEL` |
+|---------|--------------------------|
+| 4 GB | `qwen2.5:3b-instruct` (default) |
+| 8 GB | `qwen2.5:7b-instruct` |
 
 #### 2. Build and run
 
 ```bash
 docker compose up -d --build
 ```
+
+The first start downloads the model (~2 GB for the default). The frontend waits
+for the model to be ready; follow progress with `docker compose logs -f ollama`.
 
 #### 3. Access
 
@@ -201,8 +214,13 @@ docker ps
 | Variable | Required | Where | Description |
 |----------|----------|-------|-------------|
 | `BACKEND_URL` | Yes | Frontend `.env` | Backend API URL (default: `http://localhost:8000`) |
-| `GEMINI_API_KEY` | No | Root `.env` | Enables AI text cleaning/parsing (free key from [Google AI Studio](https://aistudio.google.com/apikey)) |
+| `OLLAMA_URL` | No | Frontend env | Base URL of an Ollama server (set automatically by Docker Compose). Enables local AI cleaning/parsing |
+| `OLLAMA_MODEL` | No | Root `.env` | Ollama model to pull and use (default: `qwen2.5:3b-instruct`) |
+| `OLLAMA_MEMORY_LIMIT` | No | Root `.env` | Memory cap for the Ollama container (default: `6g`) |
+| `OLLAMA_TIMEOUT_MS` | No | Root `.env` | Per-request timeout for the local model (default: `120000`) |
+| `GEMINI_API_KEY` | No | Root `.env` | Enables Gemini-based AI cleaning/parsing (free key from [Google AI Studio](https://aistudio.google.com/apikey)) |
 | `GEMINI_MODEL` | No | Root `.env` | Gemini model to use (default: `gemini-2.5-flash`; use `gemini-2.5-flash-lite` for higher free-tier limits) |
+| `LLM_PROVIDER` | No | Root `.env` | `ollama` or `gemini`. Forces a provider when both are configured; otherwise Ollama wins if `OLLAMA_URL` is set |
 
 ---
 

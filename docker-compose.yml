@@ -1,23 +1,82 @@
+# Full ScanDB stack: OCR backend, Next.js frontend and a local LLM (Ollama).
+#
+#   cp .env.example .env      # optional: pick a model / add a Gemini key
+#   docker compose up -d --build
+#
+# The first start pulls the Ollama model (~2 GB for the default); AI features
+# come online once `docker compose ps` shows the ollama service as healthy.
+# Set GEMINI_API_KEY and LLM_PROVIDER=gemini in .env to use Gemini instead.
+
 services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: scandb-llm
+    environment:
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:3b-instruct}
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
+      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-1}
+    volumes:
+      - ollama-models:/root/.ollama
+    # Not published to the host on purpose; only the frontend talks to it.
+    # To reach it locally, add:  ports: ["127.0.0.1:11434:11434"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        ollama serve &
+        pid=$$!
+        until ollama list >/dev/null 2>&1; do sleep 1; done
+        if ! ollama list | awk 'NR>1 {print $$1}' | grep -qx "$$OLLAMA_MODEL"; then
+          echo "Pulling $$OLLAMA_MODEL (first start only)..."
+          ollama pull "$$OLLAMA_MODEL"
+        fi
+        touch /tmp/model-ready
+        wait $$pid
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/model-ready && ollama list >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 180        # allow up to 30 min for the first model pull
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: ${OLLAMA_MEMORY_LIMIT:-6g}
+    restart: unless-stopped
+
   backend:
     build: ./backend
     container_name: scandb-api
     ports:
       - "8080:8000"
     environment:
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OLLAMA_URL=http://ollama:11434
     volumes:
       - ./backend/data:/app/data
     restart: unless-stopped
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        - NEXT_OUTPUT_STANDALONE=1
     container_name: scandb-web
     ports:
       - "3001:3000"
     environment:
       - BACKEND_URL=http://backend:8000
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:3b-instruct}
+      - OLLAMA_TIMEOUT_MS=${OLLAMA_TIMEOUT_MS:-120000}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - LLM_PROVIDER=${LLM_PROVIDER:-}
     depends_on:
-      - backend
+      backend:
+        condition: service_started
+      ollama:
+        condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  ollama-models:

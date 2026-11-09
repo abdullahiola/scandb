@@ -10,6 +10,10 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
+# Emit the standalone server bundle (off by default so Vercel builds are unchanged)
+ARG NEXT_OUTPUT_STANDALONE=1
+ENV NEXT_OUTPUT_STANDALONE=$NEXT_OUTPUT_STANDALONE
+
 # Build Next.js
 RUN npm run build
 

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+import { extractJsonObject, generateText, isAIConfigured } from "@/lib/llm";
 
 const SYSTEM_PROMPT = `You are a document data extraction assistant. Given raw OCR text from a scanned document, extract structured data based on the provided field schema.
 
@@ -20,8 +19,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No text provided" }, { status: 400 });
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
+    if (!isAIConfigured()) {
       // Fallback: regex-based parsing
       const parsed = regexParse(rawText, fields || []);
       return NextResponse.json({ parsed, method: "regex" });
@@ -39,52 +37,19 @@ export async function POST(request: NextRequest) {
 - For general documents: title, date, author, key_content, summary`;
     }
 
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": apiKey,
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: `${SYSTEM_PROMPT}${fieldDescription}\n\nHere is the OCR text:\n\n---\n${rawText}\n---\n\nExtract the data and return as a JSON object:`,
-                },
-              ],
-            },
-          ],
-          generationConfig: {
-            maxOutputTokens: 2000,
-            temperature: 0,
-            responseMimeType: "application/json",
-          },
-        }),
-      }
-    );
+    const prompt = `${SYSTEM_PROMPT}${fieldDescription}\n\nHere is the OCR text:\n\n---\n${rawText}\n---\n\nExtract the data and return as a JSON object:`;
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      console.error("Gemini API error:", err);
+    let responseText: string;
+    try {
+      responseText = await generateText(prompt, { json: true, maxTokens: 2000 });
+    } catch (e) {
+      console.error("LLM error:", e);
       const parsed = regexParse(rawText, fields || []);
       return NextResponse.json({ parsed, method: "regex-fallback" });
     }
 
-    const data = await res.json();
-    const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    
-    // Try to parse the JSON from the response
-    let parsed: Record<string, string> = {};
-    try {
-      // Handle case where response might be wrapped in markdown code blocks
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        parsed = JSON.parse(jsonMatch[0]);
-      }
-    } catch {
+    let parsed = extractJsonObject<Record<string, string>>(responseText);
+    if (!parsed) {
       console.error("Failed to parse AI response as JSON:", responseText);
       parsed = regexParse(rawText, fields || []);
     }
