@@ -1,24 +1,59 @@
-# Dependencies
-frontend/node_modules/
-frontend/.next/
-
-# Backend
-backend/venv/
-backend/data/
-
-# Build artifacts
-__pycache__/
-*.pyc
-*.tsbuildinfo
-
-# Environment
+# ---- Environment / secrets ----
 .env
 .env.*
 !.env.example
+*.pem
+*.key
 
-# OS
-.DS_Store
-*.swp
+# ---- Node / Next.js (frontend) ----
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.vercel/
+frontend/next-env.d.ts
+frontend/.tmp/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.eslintcache
 
-# Template scans (large image files)
+# ---- Python (backend) ----
+__pycache__/
+*.py[cod]
+*$py.class
+backend/venv/
+backend/.venv/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# ---- Runtime data ----
+backend/data/
+frontend/public/uploads/*
+!frontend/public/uploads/.gitkeep
 templates/
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+
+# ---- Logs / coverage ----
+*.log
+logs/
+coverage/
+.coverage
+htmlcov/
+
+# ---- OS / editors ----
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+!.vscode/extensions.json
