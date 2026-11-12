@@ -22,6 +22,23 @@ _engine_lock = threading.Lock()
 _predict_lock = threading.Lock()
 
 
+def _cpu_threads() -> int:
+    """
+    Inference threads, capped at the CPUs this process may use. PaddleX
+    defaults to 10, which segfaults Paddle on ARM64 Linux (e.g. Docker on
+    Apple Silicon) when the container has fewer cores. Override with
+    OCR_CPU_THREADS.
+    """
+    override = os.environ.get("OCR_CPU_THREADS")
+    if override:
+        return max(1, int(override))
+    try:
+        available = len(os.sched_getaffinity(0))
+    except AttributeError:
+        available = os.cpu_count() or 1
+    return max(1, min(available, 8))
+
+
 def get_engine():
     """Lazily create the shared PaddleOCR engine."""
     global _engine
@@ -44,6 +61,7 @@ def get_engine():
                     use_doc_orientation_classify=True,
                     use_doc_unwarping=False,
                     use_textline_orientation=False,
+                    cpu_threads=_cpu_threads(),
                 )
     return _engine
 
