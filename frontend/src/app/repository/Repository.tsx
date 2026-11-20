@@ -404,34 +404,57 @@ export default function Repository() {
 
       {/* STATS */}
       <div className="repo-stats">
-        <div className="stat-card">
-          <div className="stat-icon" style={{ background: "rgba(99,102,241,0.12)", color: "#6366f1" }}>👥</div>
+        <div className="stat-card primary">
+          <div className="stat-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
+          </div>
           <div className="stat-info">
             <div className="stat-value">{staffList.length}</div>
             <div className="stat-label">Staff Records</div>
           </div>
         </div>
-        <div className="stat-card">
-          <div className="stat-icon" style={{ background: "rgba(16,185,129,0.12)", color: "#10b981" }}>📄</div>
+        <div className="stat-card success">
+          <div className="stat-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+            </svg>
+          </div>
           <div className="stat-info">
             <div className="stat-value">{totalDocs}</div>
-            <div className="stat-label">Total Documents</div>
+            <div className="stat-label">Documents</div>
           </div>
         </div>
-        {Object.entries(typeCounts).slice(0, 6).map(([type, count]) => (
-          <div className="stat-card" key={type}>
-            <div className="stat-icon" style={{
-              background: getDocColor(type) + "18",
-              color: getDocColor(type),
-            }}>
-              {getDocIcon(type)}
-            </div>
-            <div className="stat-info">
-              <div className="stat-value">{count}</div>
-              <div className="stat-label">{getDocShortLabel(type)}</div>
-            </div>
+
+        {Object.keys(typeCounts).length > 0 && (
+          <div className="stat-types" role="group" aria-label="Filter staff by document type">
+            <span className="stat-types-label">By type</span>
+            {Object.entries(typeCounts)
+              .sort(([, a], [, b]) => b - a)
+              .map(([type, count]) => {
+                const active = typeFilter === type;
+                return (
+                  <button
+                    type="button"
+                    className={`stat-type-chip${active ? " active" : ""}`}
+                    key={type}
+                    aria-pressed={active}
+                    onClick={() => setTypeFilter(active ? null : type)}
+                  >
+                    <span className="stat-type-dot" style={{ background: getDocColor(type) }} />
+                    <span className="stat-type-icon" aria-hidden="true">{getDocIcon(type)}</span>
+                    <span className="stat-type-name">{getDocShortLabel(type)}</span>
+                    <span className="stat-type-count">{count}</span>
+                  </button>
+                );
+              })}
           </div>
-        ))}
+        )}
       </div>
 
       {/* BODY */}
@@ -439,42 +462,49 @@ export default function Repository() {
         {/* SIDEBAR */}
         <aside className="repo-sidebar">
           <div className="sidebar-search">
-            <div className="search-input-wrap">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-              <input
-                className="search-input"
-                placeholder="Search staff, department..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                id="repo-search"
-              />
+            <div className="sidebar-search-row">
+              <div className="search-input-wrap">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                <input
+                  className="search-input"
+                  placeholder="Search staff, department..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  id="repo-search"
+                />
+              </div>
+              <button
+                className="repo-btn primary add-staff-btn"
+                onClick={() => setAddStaffModal(true)}
+                aria-label="Add staff"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                Add
+              </button>
             </div>
-            <button
-              className="repo-btn primary add-staff-btn"
-              onClick={() => setAddStaffModal(true)}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-              Add Staff
-            </button>
+
+            <div className="search-input-wrap type-filter-wrap">
+              <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+              <select
+                className="search-input type-filter"
+                value={typeFilter ?? ""}
+                onChange={(e) => setTypeFilter(e.target.value || null)}
+                aria-label="Filter by document type"
+              >
+                <option value="">All document types</option>
+                {ALL_DOC_TYPE_KEYS.map((type) => (
+                  <option key={type} value={type}>
+                    {getDocShortLabel(type)}{typeCounts[type] ? ` (${typeCounts[type]})` : ""}
+                  </option>
+                ))}
+              </select>
+              <svg aria-hidden="true" className="type-filter-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+            </div>
           </div>
 
-          <div className="filter-chips">
-            <button
-              className={`filter-chip ${!typeFilter ? "active" : ""}`}
-              onClick={() => setTypeFilter(null)}
-            >
-              All
-            </button>
-            {ALL_DOC_TYPE_KEYS.map((type) => (
-              <button
-                key={type}
-                className={`filter-chip ${typeFilter === type ? "active" : ""}`}
-                onClick={() => setTypeFilter(typeFilter === type ? null : type)}
-              >
-                <span className="chip-icon">{getDocIcon(type)}</span>
-                {getDocShortLabel(type)}
-              </button>
-            ))}
+          <div className="staff-list-header">
+            <span>Staff</span>
+            <span className="staff-list-count">{filtered.length}</span>
           </div>
 
           <div className="staff-list">
