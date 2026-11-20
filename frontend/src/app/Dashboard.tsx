@@ -68,14 +68,6 @@ export default function Dashboard() {
   );
   const uniqueTypes = Object.keys(typeCounts).length;
 
-  // Recent staff (last 5 by updatedAt)
-  const recentStaff = [...staffList]
-    .sort(
-      (a, b) =>
-        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-    )
-    .slice(0, 5);
-
   // Recent documents (flatten, sort, take 6)
   const allDocs = staffList.flatMap((s) =>
     (s.documents || []).map((d) => ({
@@ -271,45 +263,6 @@ export default function Dashboard() {
                   {doc.status}
                 </span>
               </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Recent Staff */}
-      {!loading && recentStaff.length > 0 && (
-        <section className="dash-section">
-          <div className="dash-section-header">
-            <h2 className="dash-section-title">Staff Records</h2>
-            <Link href="/repository" className="dash-see-all">
-              View all →
-            </Link>
-          </div>
-          <div className="dash-staff-list">
-            {recentStaff.map((staff) => (
-              <Link
-                href="/repository"
-                className="dash-staff-card"
-                key={staff.id}
-              >
-                <div className="dash-staff-avatar">
-                  {staff.name
-                    .split(" ")
-                    .map((n) => n[0])
-                    .join("")
-                    .slice(0, 2)
-                    .toUpperCase()}
-                </div>
-                <div className="dash-staff-info">
-                  <div className="dash-staff-name">{staff.name}</div>
-                  <div className="dash-staff-dept">
-                    {staff.department || "No department"}
-                  </div>
-                </div>
-                <div className="dash-staff-badge">
-                  {staff.documents?.length || 0} docs
-                </div>
-              </Link>
             ))}
           </div>
         </section>
