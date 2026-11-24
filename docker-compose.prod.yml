@@ -1,0 +1,147 @@
+# Production stack for a VPS: Caddy (automatic HTTPS) in front of the
+# Next.js frontend, with the OCR backend and Ollama kept on a private network.
+#
+#   cp .env.example .env          # set DOMAIN at minimum
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Before the first start, point the domain's A/AAAA record at the VPS and open
+# ports 80 and 443 (Caddy needs both to get and renew the certificate).
+# Only Caddy is published; the frontend, backend and Ollama are not reachable
+# from outside the host.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    container_name: scandb-proxy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    environment:
+      - DOMAIN=${DOMAIN:?Set DOMAIN in .env (e.g. scandb.example.com)}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data          # certificates; keep this volume
+      - caddy-config:/config
+    networks:
+      - edge
+    depends_on:
+      frontend:
+        condition: service_healthy
+    restart: unless-stopped
+    logging: *default-logging
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        - NEXT_OUTPUT_STANDALONE=1
+    image: scandb-web:latest
+    container_name: scandb-web
+    environment:
+      - BACKEND_URL=http://backend:8000
+      - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:3b-instruct}
+      - OLLAMA_TIMEOUT_MS=${OLLAMA_TIMEOUT_MS:-120000}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - LLM_PROVIDER=${LLM_PROVIDER:-}
+    volumes:
+      - frontend-uploads:/app/public/uploads
+    networks:
+      - edge
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      backend:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: ${FRONTEND_MEMORY_LIMIT:-1g}
+    restart: unless-stopped
+    logging: *default-logging
+
+  backend:
+    build: ./backend
+    image: scandb-api:latest
+    container_name: scandb-api
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OLLAMA_URL=http://ollama:11434
+    volumes:
+      - ./backend/data:/app/data  # SQLite database; back this directory up
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: ${BACKEND_MEMORY_LIMIT:-3g}
+    restart: unless-stopped
+    logging: *default-logging
+
+  ollama:
+    image: ollama/ollama:${OLLAMA_IMAGE_TAG:-latest}
+    container_name: scandb-llm
+    environment:
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:3b-instruct}
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
+      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-1}
+    volumes:
+      - ollama-models:/root/.ollama
+    networks:
+      - internal
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        ollama serve &
+        pid=$$!
+        until ollama list >/dev/null 2>&1; do sleep 1; done
+        if ! ollama list | awk 'NR>1 {print $$1}' | grep -qx "$$OLLAMA_MODEL"; then
+          echo "Pulling $$OLLAMA_MODEL (first start only)..."
+          ollama pull "$$OLLAMA_MODEL"
+        fi
+        touch /tmp/model-ready
+        wait $$pid
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/model-ready && ollama list >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 180        # allow up to 30 min for the first model pull
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: ${OLLAMA_MEMORY_LIMIT:-6g}
+    restart: unless-stopped
+    logging: *default-logging
+
+networks:
+  edge:
+  # Not `internal: true`: Ollama needs outbound access to pull its model.
+  internal:
+
+volumes:
+  caddy-data:
+  caddy-config:
+  frontend-uploads:
+  ollama-models:
