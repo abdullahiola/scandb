@@ -154,6 +154,22 @@ for the model to be ready; follow progress with `docker compose logs -f ollama`.
 | Repository | http://your-server:3001/repository |
 | Backend API | http://your-server:8080/health |
 
+#### Production on a VPS (HTTPS)
+
+`docker-compose.prod.yml` puts **Caddy** in front of the app. Caddy gets and
+renews a Let's Encrypt certificate on its own. Only ports 80 and 443 are
+published. The backend and Ollama are not reachable from outside the host.
+
+1. Point your domain's DNS A/AAAA record at the VPS, and open ports 80 and 443 in its firewall.
+2. Run `cp .env.example .env` and set `DOMAIN=your.domain.com`.
+3. Run `docker compose -f docker-compose.prod.yml up -d --build`.
+
+The app is then served at `https://your.domain.com`. Back up `backend/data/`, which holds the
+SQLite database. The `caddy-data` volume holds the certificates.
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the full guide, including server setup,
+backups, updates and troubleshooting.
+
 #### Useful Docker commands
 
 ```bash
